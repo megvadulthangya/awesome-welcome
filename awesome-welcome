@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+import gi
+import os
+import subprocess
+import threading
+import sys
+import webbrowser
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+
+# --- KONFIGURÁCIÓ ---
+APP_TITLE = "Manjaro Awsome Respin Welcome"
+
+# Okos útvonalválasztás:
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+LOCAL_WRAPPER = os.path.join(CURRENT_DIR, "xl-wrapper.sh")
+
+# Ha mellette van a script (tesztelésnél), azt használjuk, amúgy a rendszert
+if os.path.exists(LOCAL_WRAPPER):
+    XLIBRE_SCRIPT = LOCAL_WRAPPER
+else:
+    XLIBRE_SCRIPT = "/usr/lib/awesome-welcome/xl-wrapper.sh"
+
+# Útvonalak az autostart logikához
+AUTOSTART_DIR = os.path.expanduser("~/.config/autostart")
+AUTOSTART_FILE = os.path.join(AUTOSTART_DIR, "awesome-welcome.desktop")
+SOURCE_DESKTOP_FILE = "/usr/share/applications/awesome-welcome.desktop"
+
+# Linkek csoportosítva
+LINKS_PROJECT = {
+    "GitHub Repo": "https://github.com/megvadulthangya/iso-profiles",
+    "☕ Buy me a Coffee": "https://buymeacoffee.com/rohambili",
+}
+
+LINKS_MANJARO = {
+    "Manjaro Forum": "https://forum.manjaro.org",
+    "Manjaro Wiki": "https://wiki.manjaro.org",
+    "Donate to Manjaro": "https://manjaro.org/donate"
+}
+
+# Nord Színséma CSS
+CSS_DATA = """
+window { background-color: #2E3440; color: #D8DEE9; }
+headerbar { background-color: #3B4252; color: #ECEFF4; border: none; }
+
+/* Nagy akciogombok stilusa */
+.action-btn { background-color: #5E81AC; color: #ECEFF4; font-weight: bold; padding: 12px; margin: 5px; }
+.action-btn:hover { background-color: #81A1C1; }
+
+/* Kisebb link gombok stilusa */
+.link-btn { background-color: #434C5E; color: #D8DEE9; padding: 6px; font-size: 13px; margin: 2px; }
+.link-btn:hover { background-color: #4C566A; }
+
+label { color: #D8DEE9; font-size: 14px; }
+switch { margin-left: 10px; }
+.title-label { font-size: 24px; font-weight: bold; color: #88C0D0; margin-bottom: 10px; }
+.desc-label { margin-bottom: 20px; color: #E5E9F0; }
+.section-label { font-size: 12px; font-weight: bold; color: #8FBCBB; margin-top: 10px; margin-bottom: 5px; }
+.autostart-box { margin-top: 15px; border-top: 1px solid #4C566A; padding-top: 10px; }
+"""
+
+class AwesomeWelcome(Gtk.Window):
+    def __init__(self):
+        super().__init__(title=APP_TITLE)
+        self.set_border_width(20)
+        self.set_default_size(700, 600) # Kicsit nagyobbra vettem a magasságot az új gomb miatt
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_resizable(False)
+
+        # Stílus betöltése
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(CSS_DATA.encode('utf-8'))
+        
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), 
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        # Headerbar
+        header = Gtk.HeaderBar()
+        header.set_show_close_button(True)
+        header.props.title = APP_TITLE
+        self.set_titlebar(header)
+
+        # Fő konténer
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.add(vbox)
+
+        # --- FEJLÉC ---
+        lbl_title = Gtk.Label(label="Welcome to Manjaro Awesome Respin")
+        lbl_title.get_style_context().add_class("title-label")
+        vbox.pack_start(lbl_title, False, False, 0)
+
+        lbl_desc = Gtk.Label(label="A clean, Nord-themed tiling experience.")
+        lbl_desc.get_style_context().add_class("desc-label")
+        vbox.pack_start(lbl_desc, False, False, 0)
+
+        # --- FŐ AKCIÓK (Grid elrendezés) ---
+        self.is_live = os.path.exists("/run/miso/bootmnt/manjaro")
+        
+        main_actions_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        vbox.pack_start(main_actions_box, False, False, 10)
+
+        if self.is_live:
+            # LIVE MÓD
+            btn_install = Gtk.Button(label="Install Manjaro Linux")
+            btn_install.get_style_context().add_class("action-btn")
+            btn_install.connect("clicked", self.on_install_manjaro)
+            
+            try:
+                icon = Gtk.Image.new_from_icon_name("system-os-installer", Gtk.IconSize.BUTTON)
+                btn_install.set_image(icon)
+                btn_install.set_always_show_image(True)
+            except:
+                pass
+            
+            main_actions_box.pack_start(btn_install, False, False, 0)
+            
+            lbl_live = Gtk.Label(label="(Running in Live Environment)")
+            main_actions_box.pack_start(lbl_live, False, False, 0)
+            
+        else:
+            # TELEPÍTETT MÓD
+            grid = Gtk.Grid()
+            grid.set_column_spacing(10)
+            grid.set_row_spacing(10)
+            grid.set_halign(Gtk.Align.CENTER)
+            
+            # Gomb 1: XLibre
+            self.btn_xlibre = Gtk.Button(label="Install XLibre")
+            self.btn_xlibre.get_style_context().add_class("action-btn")
+            self.btn_xlibre.set_size_request(250, 50)
+            self.btn_xlibre.connect("clicked", self.on_install_xlibre)
+            grid.attach(self.btn_xlibre, 0, 0, 1, 1) # 0. oszlop, 0. sor
+
+            # Gomb 2: Applications (Pamac)
+            btn_pamac = Gtk.Button(label="Manage Software")
+            btn_pamac.get_style_context().add_class("action-btn")
+            btn_pamac.set_size_request(250, 50)
+            btn_pamac.set_tooltip_text("Open Pamac Software Manager")
+            
+            try:
+                icon_pamac = Gtk.Image.new_from_icon_name("system-software-install", Gtk.IconSize.BUTTON)
+                btn_pamac.set_image(icon_pamac)
+                btn_pamac.set_always_show_image(True)
+            except:
+                pass
+            
+            btn_pamac.connect("clicked", self.on_open_pamac)
+            grid.attach(btn_pamac, 1, 0, 1, 1) # 1. oszlop, 0. sor
+            
+            # --- ÚJ GOMB: Nordic Wallpapers ---
+            btn_wall = Gtk.Button(label="Install Nordic Wallpapers")
+            btn_wall.get_style_context().add_class("action-btn")
+            btn_wall.set_size_request(510, 50) # Szélesebb, hogy kitöltse az alját
+            btn_wall.set_tooltip_text("Installs 'nordic-backgrounds' package")
+
+            try:
+                # Háttérkép ikon használata
+                icon_wall = Gtk.Image.new_from_icon_name("preferences-desktop-wallpaper", Gtk.IconSize.BUTTON)
+                btn_wall.set_image(icon_wall)
+                btn_wall.set_always_show_image(True)
+            except:
+                pass
+
+            btn_wall.connect("clicked", self.on_install_wallpapers)
+            # A grid-hez csatoljuk: 0. oszlop, 1. sor, 2 oszlop szélességben (span)
+            grid.attach(btn_wall, 0, 1, 2, 1)
+            
+            main_actions_box.pack_start(grid, False, False, 0)
+
+        # --- LINKS SZEKCIÓK ---
+        
+        # 1. Project Links
+        lbl_proj = Gtk.Label(label="PROJECT SUPPORT")
+        lbl_proj.get_style_context().add_class("section-label")
+        vbox.pack_start(lbl_proj, False, False, 5)
+
+        box_proj = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        box_proj.set_halign(Gtk.Align.CENTER)
+        
+        for name, url in LINKS_PROJECT.items():
+            self.add_link_button(box_proj, name, url)
+        vbox.pack_start(box_proj, False, False, 0)
+
+        # 2. Manjaro Links
+        lbl_manjaro = Gtk.Label(label="MANJARO OFFICIAL")
+        lbl_manjaro.get_style_context().add_class("section-label")
+        vbox.pack_start(lbl_manjaro, False, False, 5)
+
+        box_manjaro = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        box_manjaro.set_halign(Gtk.Align.CENTER)
+        
+        for name, url in LINKS_MANJARO.items():
+            self.add_link_button(box_manjaro, name, url)
+        vbox.pack_start(box_manjaro, False, False, 0)
+
+        # --- AUTOSTART KAPCSOLÓ ---
+        if not self.is_live:
+            autostart_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            autostart_box.set_halign(Gtk.Align.CENTER)
+            autostart_box.get_style_context().add_class("autostart-box")
+            
+            lbl_autostart = Gtk.Label(label="Launch at start")
+            
+            self.switch_autostart = Gtk.Switch()
+            self.switch_autostart.set_active(os.path.lexists(AUTOSTART_FILE))
+            self.switch_autostart.connect("notify::active", self.on_autostart_toggled)
+            
+            autostart_box.pack_start(lbl_autostart, False, False, 0)
+            autostart_box.pack_start(self.switch_autostart, False, False, 0)
+            vbox.pack_end(autostart_box, False, False, 10)
+
+    def add_link_button(self, box, label, url):
+        btn = Gtk.Button(label=label)
+        btn.get_style_context().add_class("link-btn")
+        btn.connect("clicked", lambda x: webbrowser.open(url))
+        box.pack_start(btn, False, False, 0)
+
+    def on_open_pamac(self, widget):
+        try:
+            subprocess.Popen(["pamac-manager"])
+        except Exception as e:
+            self.show_error(f"Error opening software manager: {e}")
+            
+    # --- ÚJ FÜGGVÉNY A WALLPAPER TELEPÍTÉSHEZ ---
+    def on_install_wallpapers(self, widget):
+        # Mivel a telepítés sudo jelszót kérhet, a legegyszerűbb
+        # egy terminálban (Tilix) futtatni a parancsot.
+        # Így a felhasználó látja a folyamatot és tud interakcióba lépni.
+        try:
+            cmd = "pamac install nordic-backgrounds; echo; echo 'Done. Press Enter to close.'; read"
+            subprocess.Popen(["tilix", "-e", "sh", "-c", cmd])
+        except Exception as e:
+            self.show_error(f"Failed to open terminal: {e}")
+
+    def on_autostart_toggled(self, switch, gparam):
+        if switch.get_active():
+            # BEKAPCSOLÁS
+            try:
+                if not os.path.exists(AUTOSTART_DIR):
+                    os.makedirs(AUTOSTART_DIR)
+                
+                if os.path.lexists(AUTOSTART_FILE):
+                    os.remove(AUTOSTART_FILE)
+                
+                os.symlink(SOURCE_DESKTOP_FILE, AUTOSTART_FILE)
+                print(f"DEBUG: Autostart enabled. Link created.")
+            except Exception as e:
+                print(f"Error enabling autostart: {e}")
+                switch.set_active(False)
+        else:
+            # KIKAPCSOLÁS
+            try:
+                if os.path.lexists(AUTOSTART_FILE):
+                    os.remove(AUTOSTART_FILE)
+                print(f"DEBUG: Autostart disabled. File removed.")
+            except Exception as e:
+                print(f"Error disabling autostart: {e}")
+
+    def on_install_manjaro(self, widget):
+        try:
+            subprocess.Popen(["calamares_polkit"])
+            self.close()
+        except Exception as e:
+            self.show_error(f"Failed to launch installer: {e}")
+
+    def on_install_xlibre(self, widget):
+        widget.set_sensitive(False)
+        widget.set_label("Installing XLibre...")
+        thread = threading.Thread(target=self._run_xlibre_script)
+        thread.daemon = True
+        thread.start()
+
+    def _run_xlibre_script(self):
+        try:
+            if not os.path.exists(XLIBRE_SCRIPT):
+                raise FileNotFoundError(f"Script not found: {XLIBRE_SCRIPT}")
+            result = subprocess.run([XLIBRE_SCRIPT], check=True, capture_output=True, text=True)
+            GLib.idle_add(self._on_xlibre_success)
+        except Exception as e:
+            GLib.idle_add(self.show_error, str(e))
+            GLib.idle_add(self._reset_xlibre_btn)
+
+    def _on_xlibre_success(self):
+        self.btn_xlibre.set_label("XLibre Installed ✓")
+    
+    def _reset_xlibre_btn(self):
+        self.btn_xlibre.set_label("Install XLibre Config")
+        self.btn_xlibre.set_sensitive(True)
+
+    def show_error(self, message):
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            flags=0,
+            message_type=Gtk.MessageType.ERROR,
+            buttons=Gtk.ButtonsType.OK,
+            text="Error"
+        )
+        dialog.format_secondary_text(str(message))
+        dialog.run()
+        dialog.destroy()
+
+if __name__ == "__main__":
+    win = AwesomeWelcome()
+    win.connect("destroy", Gtk.main_quit)
+    win.show_all()
+    Gtk.main()
