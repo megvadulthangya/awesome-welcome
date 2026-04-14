@@ -809,13 +809,14 @@ def run_tui():
 
         def action_toggle_language(self):
             self.lang.toggle()
-            tabbed = self.query_one(TabbedContent)
-            for i, st in enumerate([ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]):
-                profile = SERVICE_REGISTRY[st]
-                pane = tabbed.get_pane(tabbed.children[i])
-                pane.label = self.lang.t(profile.display_name_key)
-            docker_pane = tabbed.get_pane(tabbed.children[-1])
-            docker_pane.label = self.lang.t("service_docker")
+            panes = list(self.query(TabPane))
+            for pane in panes:
+                if pane.id in ["kohya", "forge", "comfy", "ollama"]:
+                    st = ServiceType(pane.id)
+                    profile = SERVICE_REGISTRY[st]
+                    pane.label = self.lang.t(profile.display_name_key)
+                elif pane.id == "docker":
+                    pane.label = self.lang.t("service_docker")
             self.refresh_all()
 
         def action_quit(self) -> None:
