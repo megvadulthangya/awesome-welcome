@@ -279,9 +279,24 @@ def run_tui():
     try:
         import textual
     except ImportError:
-        print("Textual library is missing. Installing TUI dependencies... Please wait.")
+        print("Textual library is missing. Setting up TUI dependencies...")
+
+        # Ensure pip is available
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "textual"])
+            import pip
+        except ImportError:
+            print("Pip not found. Bootstrapping...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "ensurepip", "--default-pip"])
+                # After ensurepip, pip should be importable
+                import pip
+            except Exception:
+                print("Hiba: A 'python-pip' csomag hiányzik. Kérlek futtasd: sudo pacman -S python-pip")
+                sys.exit(1)
+
+        print("Installing Textual with system override...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "textual", "--break-system-packages"])
             print("Installation complete. Launching TUI...")
         except Exception as e:
             print(f"Failed to install textual: {e}")
