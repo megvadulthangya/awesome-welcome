@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""
+Manjaro Awesome Respin Welcome - AI Services Manager
+Merged UI structure from manage-services.py with full service logic.
+Hybrid GTK3 (GUI) / Textual (TUI) with Nord theme, bilingual (EN/HU).
+"""
 import os
 import subprocess
 import threading
@@ -11,7 +16,7 @@ from typing import Dict, List, Optional, Callable, Any
 import json
 
 # ============================================================================
-# CONFIGURATION & CONSTANTS (Display-independent)
+# CONFIGURATION & CONSTANTS
 # ============================================================================
 APP_TITLE = "Manjaro Awesome Respin Welcome"
 
@@ -36,7 +41,7 @@ LINKS_MANJARO = {
     "Donate to Manjaro": "https://manjaro.org/donate"
 }
 
-# Nord Colors (used in both GUI and TUI)
+# Nord Colors
 NORD_COLORS = {
     "dark0": "#2E3440",
     "dark1": "#3B4252",
@@ -56,7 +61,7 @@ NORD_COLORS = {
     "purple": "#B48EAD",
 }
 
-# Bilingual strings (display-independent)
+# Bilingual strings
 STRINGS = {
     "en": {
         "window_title": "AI Services Manager",
@@ -86,7 +91,7 @@ STRINGS = {
         "tooltip_kohya_gpu": "SDXL LoRA training requires minimum 24GB VRAM. BLIP captioning works with 2GB VRAM.",
         "tooltip_kohya_cpu": "Starts Kohya_ss in CPU-only mode for low-VRAM systems.",
         "cpu_warning_title": "Warning",
-        "cpu_warning_text": "FIGYELMEZTETÉS! CPU módban SDXL LoRA készítés a steppektől, epoch-októl és CPU sebességtől függően 3-8 nap futási időt is elérhet. Biztosan folytatja?",
+        "cpu_warning_text": "WARNING! CPU mode for SDXL LoRA training may take 3-8 days depending on steps, epochs and CPU speed. Are you sure you want to continue?",
         "language": "Magyar",
         "refresh": "Refresh",
         "close": "Close",
@@ -153,7 +158,7 @@ STRINGS = {
 }
 
 # ============================================================================
-# SERVICE PROFILES REGISTRY (Display-independent)
+# SERVICE PROFILES REGISTRY
 # ============================================================================
 class ServiceType(Enum):
     KOHYA = "kohya"
@@ -241,10 +246,9 @@ SERVICE_REGISTRY = {
 }
 
 # ============================================================================
-# HELPER FUNCTIONS (Display-independent)
+# HELPER FUNCTIONS
 # ============================================================================
 def run_command(cmd: List[str], check: bool = False, capture: bool = True) -> tuple:
-    """Run command and return (returncode, stdout, stderr)"""
     try:
         result = subprocess.run(cmd, check=check, capture_output=capture, text=True)
         return result.returncode, result.stdout.strip(), result.stderr.strip()
@@ -263,15 +267,13 @@ def check_setup_done(path: str) -> bool:
     return os.path.isfile(os.path.join(path, ".setup_done"))
 
 def has_gui() -> bool:
-    """Check if a graphical environment is available."""
     return bool(os.environ.get("DISPLAY")) or bool(os.environ.get("WAYLAND_DISPLAY"))
 
 def get_downloads_dir() -> str:
-    # Fallback for non-GUI environment
     return os.path.expanduser("~/Downloads")
 
 # ============================================================================
-# TUI IMPLEMENTATION (Textual, display-agnostic but requires terminal)
+# TUI IMPLEMENTATION (Textual, with auto-install)
 # ============================================================================
 def run_tui():
     """Launch the Textual TUI for AI Services Management."""
@@ -280,20 +282,16 @@ def run_tui():
         import textual
     except ImportError:
         print("Textual library is missing. Setting up TUI dependencies...")
-
-        # Ensure pip is available
         try:
             import pip
         except ImportError:
             print("Pip not found. Bootstrapping...")
             try:
                 subprocess.check_call([sys.executable, "-m", "ensurepip", "--default-pip"])
-                # After ensurepip, pip should be importable
                 import pip
             except Exception:
                 print("Hiba: A 'python-pip' csomag hiányzik. Kérlek futtasd: sudo pacman -S python-pip")
                 sys.exit(1)
-
         print("Installing Textual with system override...")
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "textual", "--break-system-packages"])
@@ -302,60 +300,81 @@ def run_tui():
             print(f"Failed to install textual: {e}")
             sys.exit(1)
 
-    # Now safe to import
     from textual.app import App, ComposeResult
     from textual.containers import Container, Horizontal, ScrollableContainer
-    from textual.widgets import Header, Footer, Button, Static
+    from textual.widgets import Header, Footer, Button, Static, Label, TabbedContent, TabPane
     from textual import events
+    from textual.screen import ModalScreen
+    from textual.message import Message
 
-    class ServicePanel(Static):
+    class ConfirmDialog(ModalScreen):
+        """Simple confirmation dialog for CPU mode warning."""
+        def __init__(self, message: str):
+            super().__init__()
+            self.message = message
+
+        def compose(self) -> ComposeResult:
+            yield Container(
+                Static(self.message, classes="dialog-message"),
+                Horizontal(
+                    Button("Yes", variant="error", id="yes"),
+                    Button("No", variant="primary", id="no"),
+                    classes="dialog-buttons"
+                ),
+                classes="dialog"
+            )
+
+        def on_button_pressed(self, event: Button.Pressed):
+            if event.button.id == "yes":
+                self.dismiss(True)
+            else:
+                self.dismiss(False)
+
+    class ServiceWidget(Static):
         """A widget representing one service with controls."""
-        def __init__(self, service_type: ServiceType, lang: str = "en"):
+        def __init__(self, service_type: ServiceType, lang_mgr):
             super().__init__()
             self.service_type = service_type
             self.profile = SERVICE_REGISTRY[service_type]
-            self.lang = lang
-            self.strings = STRINGS[lang]
+            self.lang = lang_mgr
 
         def compose(self) -> ComposeResult:
             with Container(classes="service-panel"):
                 yield Horizontal(
-                    Static(self.strings[self.profile.display_name_key], classes="service-title"),
-                    Static("", id=f"status-{self.service_type.value}", classes="service-status"),
+                    Label(self.lang.t(self.profile.display_name_key), classes="service-title"),
+                    Label("", id=f"status-{self.service_type.value}", classes="service-status"),
                 )
                 with Horizontal(classes="button-row"):
                     if self.profile.install_cmd:
-                        yield Button(self.strings["install"], id=f"install-{self.service_type.value}")
+                        yield Button(self.lang.t("install"), id=f"install-{self.service_type.value}")
                     if self.profile.unit_name:
                         yield Button("...", id=f"enable-{self.service_type.value}")
                         yield Button("...", id=f"start-{self.service_type.value}")
-                        yield Button(self.strings["restart"], id=f"restart-{self.service_type.value}")
+                        yield Button(self.lang.t("restart"), id=f"restart-{self.service_type.value}")
                     if self.service_type == ServiceType.KOHYA:
-                        yield Button(self.strings["start_gpu"], id="kohya-gpu")
-                        yield Button(self.strings["start_cpu"], id="kohya-cpu")
+                        yield Button(self.lang.t("start_gpu"), id="kohya-gpu")
+                        yield Button(self.lang.t("start_cpu"), id="kohya-cpu")
                     if "mc" in self.profile.special_controls and self.profile.path:
-                        yield Button(self.strings["open_mc"], id=f"mc-{self.service_type.value}")
+                        yield Button(self.lang.t("open_mc"), id=f"mc-{self.service_type.value}")
                     if "extensions" in self.profile.special_controls:
-                        yield Button(self.strings["install_extensions"], id=f"exts-{self.service_type.value}")
+                        yield Button(self.lang.t("install_extensions"), id=f"exts-{self.service_type.value}")
                     if self.service_type == ServiceType.OLLAMA:
-                        yield Button(self.strings["open_dockge"], id="open-dockge")
-                    if self.service_type == ServiceType.DOCKER:
-                        yield Button(self.strings["install_docker"], id="install-docker")
-                        yield Button(self.strings["spin_dockge"], id="spin-dockge")
+                        yield Button(self.lang.t("open_dockge"), id="open-dockge")
+                # Docker is handled in separate tab
 
         def on_mount(self):
             self.update_status()
 
         def update_status(self):
             status = self.get_status_text()
-            self.query_one(f"#status-{self.service_type.value}", Static).update(status)
+            self.query_one(f"#status-{self.service_type.value}", Label).update(status)
             if self.profile.unit_name:
                 enabled = check_systemd_unit_enabled(self.profile.unit_name)
                 active = check_systemd_unit_active(self.profile.unit_name)
                 enable_btn = self.query_one(f"#enable-{self.service_type.value}", Button)
-                enable_btn.label = self.strings["disable"] if enabled else self.strings["enable"]
+                enable_btn.label = self.lang.t("disable") if enabled else self.lang.t("enable")
                 start_btn = self.query_one(f"#start-{self.service_type.value}", Button)
-                start_btn.label = self.strings["stop"] if active else self.strings["start"]
+                start_btn.label = self.lang.t("stop") if active else self.lang.t("start")
 
         def get_status_text(self) -> str:
             profile = self.profile
@@ -369,16 +388,126 @@ def run_tui():
             else:
                 installed = os.path.exists("/usr/bin/ollama") or os.path.exists("/usr/local/bin/ollama")
             if not installed:
-                parts.append(self.strings["not_installed"])
+                parts.append(self.lang.t("not_installed"))
             else:
                 if profile.unit_name:
                     active = check_systemd_unit_active(profile.unit_name)
                     enabled = check_systemd_unit_enabled(profile.unit_name)
-                    parts.append(self.strings["status_active"] if active else self.strings["status_inactive"])
-                    parts.append(self.strings["status_enabled"] if enabled else self.strings["status_disabled"])
+                    parts.append(self.lang.t("status_active") if active else self.lang.t("status_inactive"))
+                    parts.append(self.lang.t("status_enabled") if enabled else self.lang.t("status_disabled"))
                 else:
                     parts.append("Installed")
             return " | ".join(parts)
+
+        def on_button_pressed(self, event: Button.Pressed):
+            btn_id = event.button.id
+            if btn_id.startswith("install-"):
+                svc = btn_id.split("-")[1]
+                self.install_service(ServiceType(svc))
+            elif btn_id.startswith("enable-"):
+                svc = btn_id.split("-")[1]
+                self.toggle_enable(ServiceType(svc))
+            elif btn_id.startswith("start-"):
+                svc = btn_id.split("-")[1]
+                self.toggle_start_stop(ServiceType(svc))
+            elif btn_id.startswith("restart-"):
+                svc = btn_id.split("-")[1]
+                self.restart_service(ServiceType(svc))
+            elif btn_id == "kohya-gpu":
+                self.start_kohya_gpu()
+            elif btn_id == "kohya-cpu":
+                self.start_kohya_cpu()
+            elif btn_id.startswith("mc-"):
+                svc = btn_id.split("-")[1]
+                self.open_mc(ServiceType(svc))
+            elif btn_id.startswith("exts-"):
+                self.install_extensions()
+            elif btn_id == "open-dockge":
+                webbrowser.open("http://localhost:5001")
+
+        def install_service(self, st):
+            profile = SERVICE_REGISTRY[st]
+            if profile.install_cmd:
+                subprocess.Popen(profile.install_cmd, shell=True)
+
+        def toggle_enable(self, st):
+            profile = SERVICE_REGISTRY[st]
+            if profile.unit_name:
+                if check_systemd_unit_enabled(profile.unit_name):
+                    run_command(["sudo", "systemctl", "disable", "--now", profile.unit_name])
+                else:
+                    run_command(["sudo", "systemctl", "enable", "--now", profile.unit_name])
+                self.update_status()
+
+        def toggle_start_stop(self, st):
+            profile = SERVICE_REGISTRY[st]
+            if profile.unit_name:
+                if check_systemd_unit_active(profile.unit_name):
+                    run_command(["sudo", "systemctl", "stop", profile.unit_name])
+                else:
+                    run_command(["sudo", "systemctl", "start", profile.unit_name])
+                self.update_status()
+
+        def restart_service(self, st):
+            profile = SERVICE_REGISTRY[st]
+            if profile.unit_name:
+                run_command(["sudo", "systemctl", "restart", profile.unit_name])
+                self.update_status()
+
+        def start_kohya_gpu(self):
+            cmd = 'tilix -t "Kohya GPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=0; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
+            subprocess.Popen(cmd, shell=True)
+            self.update_status()
+
+        def start_kohya_cpu(self):
+            def run_cpu():
+                cmd = 'tilix -t "Kohya CPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=\\"\\"; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
+                subprocess.Popen(cmd, shell=True)
+                self.update_status()
+
+            self.app.push_screen(ConfirmDialog(self.lang.t("cpu_warning_text")), callback=lambda result: run_cpu() if result else None)
+
+        def open_mc(self, st):
+            profile = SERVICE_REGISTRY[st]
+            if profile.path:
+                downloads = os.path.expanduser("~/Downloads")
+                subprocess.Popen(f"tilix -e mc {downloads} {profile.path}", shell=True)
+
+        def install_extensions(self):
+            script = "/usr/local/bin/manage-services.sh"
+            if not os.path.exists(script):
+                script = os.path.join(CURRENT_DIR, "manage-services.sh")
+            if os.path.exists(script):
+                cmd = f'tilix -t "Installing Forge Extensions" -e "bash -c \'sudo {script} exts sdwebui; read\'"'
+                subprocess.Popen(cmd, shell=True)
+
+    class DockerWidget(Static):
+        def __init__(self, lang_mgr):
+            super().__init__()
+            self.lang = lang_mgr
+
+        def compose(self) -> ComposeResult:
+            with Container(classes="service-panel"):
+                yield Label(self.lang.t("service_docker"), classes="service-title")
+                yield Button(self.lang.t("install_docker"), id="install-docker")
+                yield Button(self.lang.t("spin_dockge"), id="spin-dockge")
+
+        def on_button_pressed(self, event: Button.Pressed):
+            if event.button.id == "install-docker":
+                subprocess.Popen('tilix -e "bash -c \'sudo pacman -S --needed docker docker-compose; sudo systemctl enable --now docker; read\'"', shell=True)
+            elif event.button.id == "spin-dockge":
+                subprocess.Popen('tilix -e "bash -c \'sudo docker compose -f /docker/dockge/docker-compose.yml up -d && sleep 30 && xdg-open http://localhost:5001; read\'"', shell=True)
+
+    class LanguageManager:
+        def __init__(self, app, initial="en"):
+            self.app = app
+            self.current = initial
+
+        def t(self, key: str) -> str:
+            return STRINGS[self.current].get(key, key)
+
+        def toggle(self):
+            self.current = "hu" if self.current == "en" else "en"
 
     class AIServicesManagerTUI(App):
         CSS = f"""
@@ -414,138 +543,67 @@ def run_tui():
         Button:hover {{
             background: {NORD_COLORS['frost3']};
         }}
+        .dialog {{
+            background: {NORD_COLORS['dark1']};
+            border: thick {NORD_COLORS['red']};
+            padding: 2;
+            margin: 10 20;
+        }}
+        .dialog-message {{
+            color: {NORD_COLORS['light1']};
+            padding: 1;
+        }}
+        .dialog-buttons {{
+            margin-top: 1;
+            align: center middle;
+        }}
         """
 
         def __init__(self):
             super().__init__()
-            self.lang = "en"
-            self.strings = STRINGS[self.lang]
+            self.lang = LanguageManager(self, "en")
 
         def compose(self) -> ComposeResult:
             yield Header()
-            yield ScrollableContainer(*[ServicePanel(st, self.lang) for st in ServiceType])
-            with Horizontal(classes="footer-buttons"):
-                yield Button(self.strings["refresh"], id="refresh")
-                yield Button(self.strings["language"], id="lang")
-                yield Button(self.strings["close"], id="close")
             yield Footer()
+            with TabbedContent():
+                for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]:
+                    profile = SERVICE_REGISTRY[st]
+                    with TabPane(self.lang.t(profile.display_name_key), id=st.value):
+                        yield ServiceWidget(st, self.lang)
+                with TabPane(self.lang.t("service_docker"), id="docker"):
+                    yield DockerWidget(self.lang)
 
         def on_mount(self):
             self.set_interval(5, self.refresh_all)
             self.refresh_all()
 
         def refresh_all(self):
-            for child in self.query(ServicePanel):
-                child.update_status()
+            for tab_id in ["kohya", "forge", "comfy", "ollama"]:
+                try:
+                    pane = self.query_one(f"#{tab_id}")
+                    widget = pane.query_one(ServiceWidget)
+                    widget.update_status()
+                except:
+                    pass
 
-        def on_button_pressed(self, event: Button.Pressed):
-            btn_id = event.button.id
-            if btn_id == "refresh":
-                self.refresh_all()
-            elif btn_id == "lang":
-                self.toggle_language()
-            elif btn_id == "close":
-                self.exit()
-            elif btn_id.startswith("install-"):
-                svc = btn_id.split("-")[1]
-                self.install_service(ServiceType(svc))
-            elif btn_id.startswith("enable-"):
-                svc = btn_id.split("-")[1]
-                self.toggle_enable(ServiceType(svc))
-            elif btn_id.startswith("start-"):
-                svc = btn_id.split("-")[1]
-                self.toggle_start_stop(ServiceType(svc))
-            elif btn_id.startswith("restart-"):
-                svc = btn_id.split("-")[1]
-                self.restart_service(ServiceType(svc))
-            elif btn_id == "kohya-gpu":
-                self.start_kohya_gpu()
-            elif btn_id == "kohya-cpu":
-                self.start_kohya_cpu()
-            elif btn_id.startswith("mc-"):
-                svc = btn_id.split("-")[1]
-                self.open_mc(ServiceType(svc))
-            elif btn_id.startswith("exts-"):
-                self.install_extensions()
-            elif btn_id == "open-dockge":
-                webbrowser.open("http://localhost:5001")
-            elif btn_id == "install-docker":
-                self.install_docker()
-            elif btn_id == "spin-dockge":
-                self.spin_dockge()
-
-        def toggle_language(self):
-            self.lang = "hu" if self.lang == "en" else "en"
-            self.strings = STRINGS[self.lang]
+        def action_toggle_language(self):
+            self.lang.toggle()
+            # Update tab labels
+            tabbed = self.query_one(TabbedContent)
+            for i, st in enumerate([ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]):
+                profile = SERVICE_REGISTRY[st]
+                pane = tabbed.get_pane(tabbed.children[i])
+                pane.label = self.lang.t(profile.display_name_key)
+            docker_pane = tabbed.get_pane(tabbed.children[-1])
+            docker_pane.label = self.lang.t("service_docker")
             self.refresh_all()
-            for btn_id, label_key in [
-                ("refresh", "refresh"),
-                ("lang", "language"),
-                ("close", "close"),
-            ]:
-                btn = self.query_one(f"#{btn_id}", Button)
-                btn.label = self.strings[label_key]
-            for st in ServiceType:
-                panel = self.query_one(f"ServicePanel", ServicePanel)
-                panel.strings = self.strings
-                panel.update_status()
 
-        def install_service(self, st):
-            profile = SERVICE_REGISTRY[st]
-            if profile.install_cmd:
-                subprocess.Popen(profile.install_cmd, shell=True)
-
-        def toggle_enable(self, st):
-            profile = SERVICE_REGISTRY[st]
-            if profile.unit_name:
-                if check_systemd_unit_enabled(profile.unit_name):
-                    run_command(["sudo", "systemctl", "disable", "--now", profile.unit_name])
-                else:
-                    run_command(["sudo", "systemctl", "enable", "--now", profile.unit_name])
-                self.refresh_all()
-
-        def toggle_start_stop(self, st):
-            profile = SERVICE_REGISTRY[st]
-            if profile.unit_name:
-                if check_systemd_unit_active(profile.unit_name):
-                    run_command(["sudo", "systemctl", "stop", profile.unit_name])
-                else:
-                    run_command(["sudo", "systemctl", "start", profile.unit_name])
-                self.refresh_all()
-
-        def restart_service(self, st):
-            profile = SERVICE_REGISTRY[st]
-            if profile.unit_name:
-                run_command(["sudo", "systemctl", "restart", profile.unit_name])
-                self.refresh_all()
-
-        def start_kohya_gpu(self):
-            cmd = 'tilix -t "Kohya GPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=0; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
-            subprocess.Popen(cmd, shell=True)
-
-        def start_kohya_cpu(self):
-            cmd = 'tilix -t "Kohya CPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=\\"\\"; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
-            subprocess.Popen(cmd, shell=True)
-
-        def open_mc(self, st):
-            profile = SERVICE_REGISTRY[st]
-            if profile.path:
-                downloads = os.path.expanduser("~/Downloads")
-                subprocess.Popen(f"tilix -e mc {downloads} {profile.path}", shell=True)
-
-        def install_extensions(self):
-            script = "/usr/local/bin/manage-services.sh"
-            if not os.path.exists(script):
-                script = os.path.join(CURRENT_DIR, "manage-services.sh")
-            if os.path.exists(script):
-                cmd = f'tilix -t "Installing Forge Extensions" -e "bash -c \'sudo {script} exts sdwebui; read\'"'
-                subprocess.Popen(cmd, shell=True)
-
-        def install_docker(self):
-            subprocess.Popen('tilix -e "bash -c \'sudo pacman -S --needed docker docker-compose; sudo systemctl enable --now docker; read\'"', shell=True)
-
-        def spin_dockge(self):
-            subprocess.Popen('tilix -e "bash -c \'sudo docker compose -f /docker/dockge/docker-compose.yml up -d && sleep 30 && xdg-open http://localhost:5001; read\'"', shell=True)
+        def on_key(self, event: events.Key):
+            if event.key == "l":
+                self.action_toggle_language()
+            elif event.key == "q":
+                self.exit()
 
     app = AIServicesManagerTUI()
     app.run()
@@ -559,38 +617,36 @@ def run_gui():
     gi.require_version("Gtk", "3.0")
     from gi.repository import Gtk, Gdk, GLib, Pango
 
-    # Nord Theme CSS for GTK
-    CSS_DATA = """
-    window { background-color: #2E3440; color: #D8DEE9; }
-    headerbar { background-color: #3B4252; color: #ECEFF4; border: none; }
-    .action-btn { background-color: #5E81AC; color: #ECEFF4; font-weight: bold; padding: 12px; margin: 5px; }
-    .action-btn:hover { background-color: #81A1C1; }
-    .link-btn { background-color: #434C5E; color: #D8DEE9; padding: 6px; font-size: 13px; margin: 2px; }
-    .link-btn:hover { background-color: #4C566A; }
-    label { color: #D8DEE9; font-size: 14px; }
-    switch { margin-left: 10px; }
-    .title-label { font-size: 24px; font-weight: bold; color: #88C0D0; margin-bottom: 10px; }
-    .desc-label { margin-bottom: 20px; color: #E5E9F0; }
-    .section-label { font-size: 12px; font-weight: bold; color: #8FBCBB; margin-top: 10px; margin-bottom: 5px; }
-    .autostart-box { margin-top: 15px; border-top: 1px solid #4C566A; padding-top: 10px; }
-    .service-frame { border: 1px solid #4C566A; border-radius: 8px; padding: 10px; margin: 8px; background-color: #3B4252; }
-    .service-title { font-size: 16px; font-weight: bold; color: #88C0D0; margin-bottom: 5px; }
-    .service-status { font-size: 12px; color: #A3BE8C; }
-    .service-button { background-color: #4C566A; color: #ECEFF4; padding: 6px; margin: 2px; font-size: 12px; }
-    .service-button:hover { background-color: #5E81AC; }
-    .warning-label { color: #BF616A; font-size: 12px; }
+    CSS_DATA = f"""
+    window {{ background-color: {NORD_COLORS['dark0']}; color: {NORD_COLORS['light0']}; }}
+    headerbar {{ background-color: {NORD_COLORS['dark1']}; color: {NORD_COLORS['light2']}; border: none; }}
+    .action-btn {{ background-color: {NORD_COLORS['frost3']}; color: {NORD_COLORS['light2']}; font-weight: bold; padding: 12px; margin: 5px; }}
+    .action-btn:hover {{ background-color: {NORD_COLORS['frost2']}; }}
+    .link-btn {{ background-color: {NORD_COLORS['dark2']}; color: {NORD_COLORS['light0']}; padding: 6px; font-size: 13px; margin: 2px; }}
+    .link-btn:hover {{ background-color: {NORD_COLORS['dark3']}; }}
+    label {{ color: {NORD_COLORS['light0']}; font-size: 14px; }}
+    switch {{ margin-left: 10px; }}
+    .title-label {{ font-size: 24px; font-weight: bold; color: {NORD_COLORS['frost1']}; margin-bottom: 10px; }}
+    .desc-label {{ margin-bottom: 20px; color: {NORD_COLORS['light1']}; }}
+    .section-label {{ font-size: 12px; font-weight: bold; color: {NORD_COLORS['frost0']}; margin-top: 10px; margin-bottom: 5px; }}
+    .autostart-box {{ margin-top: 15px; border-top: 1px solid {NORD_COLORS['dark3']}; padding-top: 10px; }}
+    .service-frame {{ border: 1px solid {NORD_COLORS['dark3']}; border-radius: 8px; padding: 10px; margin: 8px; background-color: {NORD_COLORS['dark1']}; }}
+    .service-title {{ font-size: 16px; font-weight: bold; color: {NORD_COLORS['frost1']}; margin-bottom: 5px; }}
+    .service-status {{ font-size: 12px; color: {NORD_COLORS['green']}; }}
+    .service-button {{ background-color: {NORD_COLORS['dark3']}; color: {NORD_COLORS['light2']}; padding: 6px; margin: 2px; font-size: 12px; }}
+    .service-button:hover {{ background-color: {NORD_COLORS['frost3']}; }}
+    .warning-label {{ color: {NORD_COLORS['red']}; font-size: 12px; }}
     """
 
     class AIServicesManagerGTK(Gtk.Window):
         def __init__(self):
             super().__init__(title=STRINGS["en"]["window_title"])
-            self.set_default_size(900, 700)
+            self.set_default_size(950, 750)
             self.set_position(Gtk.WindowPosition.CENTER)
             self.set_resizable(True)
 
             self.lang = "en"
             self.strings = STRINGS[self.lang]
-            self.service_widgets = {}
             self.polling = False
 
             css_provider = Gtk.CssProvider()
@@ -611,17 +667,18 @@ def run_gui():
             header.pack_end(self.lang_btn)
 
             refresh_btn = Gtk.Button(label=self.strings["refresh"])
-            refresh_btn.connect("clicked", lambda x: self.refresh_all_states())
+            refresh_btn.connect("clicked", lambda x: self.refresh_all())
             header.pack_end(refresh_btn)
 
-            self.vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-            self.vbox.set_margin_top(10)
-            self.vbox.set_margin_bottom(10)
-            self.vbox.set_margin_start(10)
-            self.vbox.set_margin_end(10)
-            self.add(self.vbox)
+            # Add explicit Close button in header bar (always visible)
+            close_btn = Gtk.Button(label=self.strings["close"])
+            close_btn.connect("clicked", lambda x: self.destroy())
+            header.pack_start(close_btn)
 
-            self.create_service_ui()
+            self.notebook = Gtk.Notebook()
+            self.add(self.notebook)
+
+            self.create_service_tabs()
 
             self.polling = True
             self.poll_thread = threading.Thread(target=self.poll_services_loop, daemon=True)
@@ -641,163 +698,164 @@ def run_gui():
             self.update_ui_language()
 
         def update_ui_language(self):
-            for service_type, widgets in self.service_widgets.items():
-                profile = SERVICE_REGISTRY[service_type]
-                widgets["title"].set_label(self.strings[profile.display_name_key])
-                if "install_btn" in widgets:
-                    widgets["install_btn"].set_label(self.strings["install"])
-                if "restart_btn" in widgets:
-                    widgets["restart_btn"].set_label(self.strings["restart"])
-                if "start_gpu_btn" in widgets:
-                    widgets["start_gpu_btn"].set_label(self.strings["start_gpu"])
-                    widgets["start_gpu_btn"].set_tooltip_text(self.strings["tooltip_kohya_gpu"])
-                if "start_cpu_btn" in widgets:
-                    widgets["start_cpu_btn"].set_label(self.strings["start_cpu"])
-                    widgets["start_cpu_btn"].set_tooltip_text(self.strings["tooltip_kohya_cpu"])
-                if "mc_btn" in widgets:
-                    widgets["mc_btn"].set_label(self.strings["open_mc"])
-                if "exts_btn" in widgets:
-                    widgets["exts_btn"].set_label(self.strings["install_extensions"])
-                if "dockge_btn" in widgets:
-                    widgets["dockge_btn"].set_label(self.strings["open_dockge"])
-                if "install_docker_btn" in widgets:
-                    widgets["install_docker_btn"].set_label(self.strings["install_docker"])
-                if "spin_dockge_btn" in widgets:
-                    widgets["spin_dockge_btn"].set_label(self.strings["spin_dockge"])
-            self.refresh_all_states()
+            # Update tab labels
+            for i, st in enumerate([ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]):
+                profile = SERVICE_REGISTRY[st]
+                page = self.notebook.get_nth_page(i)
+                label = self.notebook.get_tab_label(page)
+                label.set_text(self.strings[profile.display_name_key])
+            docker_page = self.notebook.get_nth_page(4)
+            label = self.notebook.get_tab_label(docker_page)
+            label.set_text(self.strings["service_docker"])
+            self.refresh_all()
 
-        def create_service_ui(self):
-            scroll = Gtk.ScrolledWindow()
-            scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            self.vbox.pack_start(scroll, True, True, 0)
+        def create_service_tabs(self):
+            # Tab for each service
+            for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]:
+                profile = SERVICE_REGISTRY[st]
+                page = self.create_service_page(st, profile)
+                label = Gtk.Label(label=self.strings[profile.display_name_key])
+                self.notebook.append_page(page, label)
 
-            content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-            scroll.add(content_box)
+            # Docker tools tab
+            docker_page = self.create_docker_page()
+            label = Gtk.Label(label=self.strings["service_docker"])
+            self.notebook.append_page(docker_page, label)
 
-            for service_type in ServiceType:
-                frame = Gtk.Frame()
-                frame.get_style_context().add_class("service-frame")
-                vbox_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-                vbox_inner.set_margin_top(5)
-                vbox_inner.set_margin_bottom(5)
-                vbox_inner.set_margin_start(5)
-                vbox_inner.set_margin_end(5)
-                frame.add(vbox_inner)
+        def create_service_page(self, st: ServiceType, profile: ServiceProfile):
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            box.set_margin_top(10)
+            box.set_margin_bottom(10)
+            box.set_margin_start(10)
+            box.set_margin_end(10)
 
-                profile = SERVICE_REGISTRY[service_type]
+            # Title and status
+            hbox_title = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            title_label = Gtk.Label()
+            title_label.get_style_context().add_class("service-title")
+            title_label.set_text(self.strings[profile.display_name_key])
+            hbox_title.pack_start(title_label, False, False, 0)
 
-                hbox_title = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-                title_label = Gtk.Label()
-                title_label.get_style_context().add_class("service-title")
-                title_label.set_text(self.strings[profile.display_name_key])
-                hbox_title.pack_start(title_label, False, False, 0)
+            status_label = Gtk.Label()
+            status_label.get_style_context().add_class("service-status")
+            hbox_title.pack_end(status_label, False, False, 0)
+            box.pack_start(hbox_title, False, False, 0)
 
-                status_label = Gtk.Label()
-                status_label.get_style_context().add_class("service-status")
-                hbox_title.pack_end(status_label, False, False, 0)
+            # Buttons container
+            btn_box = Gtk.FlowBox()
+            btn_box.set_selection_mode(Gtk.SelectionMode.NONE)
+            btn_box.set_homogeneous(False)
+            btn_box.set_column_spacing(5)
+            btn_box.set_row_spacing(5)
 
-                vbox_inner.pack_start(hbox_title, False, False, 0)
-
-                hbox_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-                widgets = {
-                    "title": title_label,
-                    "status": status_label,
-                    "hbox_buttons": hbox_buttons,
-                }
-
-                if profile.install_cmd:
-                    install_btn = Gtk.Button(label=self.strings["install"])
-                    install_btn.get_style_context().add_class("service-button")
-                    install_btn.connect("clicked", self.on_install_clicked, service_type)
-                    hbox_buttons.pack_start(install_btn, False, False, 0)
-                    widgets["install_btn"] = install_btn
-
-                if profile.unit_name:
-                    enable_btn = Gtk.Button(label="...")
-                    enable_btn.get_style_context().add_class("service-button")
-                    enable_btn.connect("clicked", self.on_toggle_enable, service_type)
-                    hbox_buttons.pack_start(enable_btn, False, False, 0)
-                    widgets["enable_btn"] = enable_btn
-
-                    start_btn = Gtk.Button(label="...")
-                    start_btn.get_style_context().add_class("service-button")
-                    start_btn.connect("clicked", self.on_toggle_start_stop, service_type)
-                    hbox_buttons.pack_start(start_btn, False, False, 0)
-                    widgets["start_btn"] = start_btn
-
-                    restart_btn = Gtk.Button(label=self.strings["restart"])
-                    restart_btn.get_style_context().add_class("service-button")
-                    restart_btn.connect("clicked", self.on_restart, service_type)
-                    hbox_buttons.pack_start(restart_btn, False, False, 0)
-                    widgets["restart_btn"] = restart_btn
-
-                if service_type == ServiceType.KOHYA:
-                    start_gpu_btn = Gtk.Button(label=self.strings["start_gpu"])
-                    start_gpu_btn.get_style_context().add_class("service-button")
-                    start_gpu_btn.set_tooltip_text(self.strings["tooltip_kohya_gpu"])
-                    start_gpu_btn.connect("clicked", self.on_start_kohya_gpu)
-                    hbox_buttons.pack_start(start_gpu_btn, False, False, 0)
-                    widgets["start_gpu_btn"] = start_gpu_btn
-
-                    start_cpu_btn = Gtk.Button(label=self.strings["start_cpu"])
-                    start_cpu_btn.get_style_context().add_class("service-button")
-                    start_cpu_btn.set_tooltip_text(self.strings["tooltip_kohya_cpu"])
-                    start_cpu_btn.connect("clicked", self.on_start_kohya_cpu)
-                    hbox_buttons.pack_start(start_cpu_btn, False, False, 0)
-                    widgets["start_cpu_btn"] = start_cpu_btn
-
-                if "mc" in profile.special_controls and profile.path:
-                    mc_btn = Gtk.Button(label=self.strings["open_mc"])
-                    mc_btn.get_style_context().add_class("service-button")
-                    mc_btn.connect("clicked", self.on_open_mc, service_type)
-                    hbox_buttons.pack_start(mc_btn, False, False, 0)
-                    widgets["mc_btn"] = mc_btn
-
-                if "extensions" in profile.special_controls:
-                    exts_btn = Gtk.Button(label=self.strings["install_extensions"])
-                    exts_btn.get_style_context().add_class("service-button")
-                    exts_btn.connect("clicked", self.on_install_extensions, service_type)
-                    hbox_buttons.pack_start(exts_btn, False, False, 0)
-                    widgets["exts_btn"] = exts_btn
-
-                if service_type == ServiceType.OLLAMA:
-                    dockge_btn = Gtk.Button(label=self.strings["open_dockge"])
-                    dockge_btn.get_style_context().add_class("service-button")
-                    dockge_btn.connect("clicked", lambda x: webbrowser.open("http://localhost:5001"))
-                    hbox_buttons.pack_start(dockge_btn, False, False, 0)
-                    widgets["dockge_btn"] = dockge_btn
-
-                if service_type == ServiceType.DOCKER:
-                    install_docker_btn = Gtk.Button(label=self.strings["install_docker"])
-                    install_docker_btn.get_style_context().add_class("service-button")
-                    install_docker_btn.connect("clicked", self.on_install_docker)
-                    hbox_buttons.pack_start(install_docker_btn, False, False, 0)
-                    widgets["install_docker_btn"] = install_docker_btn
-
-                    spin_dockge_btn = Gtk.Button(label=self.strings["spin_dockge"])
-                    spin_dockge_btn.get_style_context().add_class("service-button")
-                    spin_dockge_btn.connect("clicked", self.on_spin_dockge)
-                    hbox_buttons.pack_start(spin_dockge_btn, False, False, 0)
-                    widgets["spin_dockge_btn"] = spin_dockge_btn
-
-                vbox_inner.pack_start(hbox_buttons, False, False, 0)
-                content_box.pack_start(frame, False, False, 0)
-                self.service_widgets[service_type] = widgets
-
-            close_btn = Gtk.Button(label=self.strings["close"])
-            close_btn.get_style_context().add_class("action-btn")
-            close_btn.connect("clicked", lambda x: self.destroy())
-            self.vbox.pack_start(close_btn, False, False, 0)
-
-        def on_install_clicked(self, btn, service_type):
-            profile = SERVICE_REGISTRY[service_type]
+            # Install
             if profile.install_cmd:
-                if profile.path:
-                    os.chdir(profile.path)
+                btn_install = Gtk.Button(label=self.strings["install"])
+                btn_install.get_style_context().add_class("service-button")
+                btn_install.connect("clicked", self.on_install_clicked, st)
+                btn_box.add(btn_install)
+                setattr(self, f"btn_install_{st.value}", btn_install)
+
+            # Enable/Disable
+            if profile.unit_name:
+                btn_enable = Gtk.Button(label="...")
+                btn_enable.get_style_context().add_class("service-button")
+                btn_enable.connect("clicked", self.on_toggle_enable, st)
+                btn_box.add(btn_enable)
+                setattr(self, f"btn_enable_{st.value}", btn_enable)
+
+                btn_start = Gtk.Button(label="...")
+                btn_start.get_style_context().add_class("service-button")
+                btn_start.connect("clicked", self.on_toggle_start_stop, st)
+                btn_box.add(btn_start)
+                setattr(self, f"btn_start_{st.value}", btn_start)
+
+                btn_restart = Gtk.Button(label=self.strings["restart"])
+                btn_restart.get_style_context().add_class("service-button")
+                btn_restart.connect("clicked", self.on_restart, st)
+                btn_box.add(btn_restart)
+                setattr(self, f"btn_restart_{st.value}", btn_restart)
+
+            # Kohya special
+            if st == ServiceType.KOHYA:
+                btn_gpu = Gtk.Button(label=self.strings["start_gpu"])
+                btn_gpu.get_style_context().add_class("service-button")
+                btn_gpu.set_tooltip_text(self.strings["tooltip_kohya_gpu"])
+                btn_gpu.connect("clicked", self.on_start_kohya_gpu)
+                btn_box.add(btn_gpu)
+                self.btn_kohya_gpu = btn_gpu
+
+                btn_cpu = Gtk.Button(label=self.strings["start_cpu"])
+                btn_cpu.get_style_context().add_class("service-button")
+                btn_cpu.set_tooltip_text(self.strings["tooltip_kohya_cpu"])
+                btn_cpu.connect("clicked", self.on_start_kohya_cpu)
+                btn_box.add(btn_cpu)
+                self.btn_kohya_cpu = btn_cpu
+
+            # MC button
+            if "mc" in profile.special_controls and profile.path:
+                btn_mc = Gtk.Button(label=self.strings["open_mc"])
+                btn_mc.get_style_context().add_class("service-button")
+                btn_mc.connect("clicked", self.on_open_mc, st)
+                btn_box.add(btn_mc)
+                setattr(self, f"btn_mc_{st.value}", btn_mc)
+
+            # Extensions button
+            if "extensions" in profile.special_controls:
+                btn_exts = Gtk.Button(label=self.strings["install_extensions"])
+                btn_exts.get_style_context().add_class("service-button")
+                btn_exts.connect("clicked", self.on_install_extensions, st)
+                btn_box.add(btn_exts)
+                setattr(self, f"btn_exts_{st.value}", btn_exts)
+
+            # Ollama Dockge button
+            if st == ServiceType.OLLAMA:
+                btn_dockge = Gtk.Button(label=self.strings["open_dockge"])
+                btn_dockge.get_style_context().add_class("service-button")
+                btn_dockge.connect("clicked", lambda x: webbrowser.open("http://localhost:5001"))
+                btn_box.add(btn_dockge)
+                self.btn_dockge = btn_dockge
+
+            box.pack_start(btn_box, False, False, 0)
+
+            # Store status label
+            setattr(self, f"status_label_{st.value}", status_label)
+
+            return box
+
+        def create_docker_page(self):
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            box.set_margin_top(20)
+            box.set_margin_start(20)
+            box.set_margin_end(20)
+
+            title = Gtk.Label()
+            title.get_style_context().add_class("service-title")
+            title.set_text(self.strings["service_docker"])
+            box.pack_start(title, False, False, 0)
+
+            btn_install = Gtk.Button(label=self.strings["install_docker"])
+            btn_install.get_style_context().add_class("service-button")
+            btn_install.connect("clicked", self.on_install_docker)
+            box.pack_start(btn_install, False, False, 0)
+            self.btn_docker_install = btn_install
+
+            btn_spin = Gtk.Button(label=self.strings["spin_dockge"])
+            btn_spin.get_style_context().add_class("service-button")
+            btn_spin.connect("clicked", self.on_spin_dockge)
+            box.pack_start(btn_spin, False, False, 0)
+            self.btn_docker_spin = btn_spin
+
+            return box
+
+        # Service actions (same as original)
+        def on_install_clicked(self, btn, st):
+            profile = SERVICE_REGISTRY[st]
+            if profile.install_cmd:
                 subprocess.Popen(profile.install_cmd, shell=True)
 
-        def on_toggle_enable(self, btn, service_type):
-            profile = SERVICE_REGISTRY[service_type]
+        def on_toggle_enable(self, btn, st):
+            profile = SERVICE_REGISTRY[st]
             if not profile.unit_name:
                 return
             is_enabled = check_systemd_unit_enabled(profile.unit_name)
@@ -805,10 +863,10 @@ def run_gui():
                 run_command(["sudo", "systemctl", "disable", "--now", profile.unit_name])
             else:
                 run_command(["sudo", "systemctl", "enable", "--now", profile.unit_name])
-            self.refresh_service_state(service_type)
+            self.refresh_service_state(st)
 
-        def on_toggle_start_stop(self, btn, service_type):
-            profile = SERVICE_REGISTRY[service_type]
+        def on_toggle_start_stop(self, btn, st):
+            profile = SERVICE_REGISTRY[st]
             if not profile.unit_name:
                 return
             is_active = check_systemd_unit_active(profile.unit_name)
@@ -816,16 +874,16 @@ def run_gui():
                 run_command(["sudo", "systemctl", "stop", profile.unit_name])
             else:
                 run_command(["sudo", "systemctl", "start", profile.unit_name])
-            self.refresh_service_state(service_type)
+            self.refresh_service_state(st)
 
-        def on_restart(self, btn, service_type):
-            profile = SERVICE_REGISTRY[service_type]
+        def on_restart(self, btn, st):
+            profile = SERVICE_REGISTRY[st]
             if profile.unit_name:
                 run_command(["sudo", "systemctl", "restart", profile.unit_name])
-                self.refresh_service_state(service_type)
+                self.refresh_service_state(st)
 
         def on_start_kohya_gpu(self, btn):
-            cmd = 'tilix -t "Kohya GPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=0; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\\"; echo Started; read\'"'
+            cmd = 'tilix -t "Kohya GPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=0; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
             subprocess.Popen(cmd, shell=True)
             self.refresh_service_state(ServiceType.KOHYA)
 
@@ -841,20 +899,20 @@ def run_gui():
             response = dialog.run()
             dialog.destroy()
             if response == Gtk.ResponseType.OK:
-                cmd = 'tilix -t "Kohya CPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=\\"\\"; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\\"; echo Started; read\'"'
+                cmd = 'tilix -t "Kohya CPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=\\"\\"; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
                 subprocess.Popen(cmd, shell=True)
                 self.refresh_service_state(ServiceType.KOHYA)
 
-        def on_open_mc(self, btn, service_type):
-            profile = SERVICE_REGISTRY[service_type]
+        def on_open_mc(self, btn, st):
+            profile = SERVICE_REGISTRY[st]
             if not profile.path:
                 return
             downloads = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) or os.path.expanduser("~/Downloads")
             cmd = f'tilix -e mc {downloads} {profile.path}'
             subprocess.Popen(cmd, shell=True)
 
-        def on_install_extensions(self, btn, service_type):
-            if service_type == ServiceType.FORGE:
+        def on_install_extensions(self, btn, st):
+            if st == ServiceType.FORGE:
                 script = "/usr/local/bin/manage-services.sh"
                 if not os.path.exists(script):
                     script = os.path.join(CURRENT_DIR, "manage-services.sh")
@@ -870,10 +928,9 @@ def run_gui():
             cmd = 'tilix -t "Starting Dockge" -e "bash -c \'sudo docker compose -f /docker/dockge/docker-compose.yml up -d && sleep 30 && xdg-open http://localhost:5001; read\'"'
             subprocess.Popen(cmd, shell=True)
 
-        def refresh_service_state(self, service_type):
-            profile = SERVICE_REGISTRY[service_type]
-            widgets = self.service_widgets[service_type]
-            status_parts = []
+        def refresh_service_state(self, st: ServiceType):
+            profile = SERVICE_REGISTRY[st]
+            status_label = getattr(self, f"status_label_{st.value}")
 
             installed = False
             if profile.path:
@@ -883,6 +940,8 @@ def run_gui():
                     installed = os.path.isdir(profile.path)
             else:
                 installed = os.path.exists("/usr/bin/ollama") or os.path.exists("/usr/local/bin/ollama")
+
+            status_parts = []
             if not installed:
                 status_parts.append(self.strings["not_installed"])
             else:
@@ -893,27 +952,27 @@ def run_gui():
                     status_parts.append(self.strings["status_enabled"] if enabled else self.strings["status_disabled"])
                 else:
                     status_parts.append("Installed")
+            GLib.idle_add(status_label.set_label, " | ".join(status_parts))
 
-            GLib.idle_add(widgets["status"].set_label, " | ".join(status_parts))
-
-            if "enable_btn" in widgets:
+            # Update button labels
+            if hasattr(self, f"btn_enable_{st.value}"):
+                btn_enable = getattr(self, f"btn_enable_{st.value}")
                 if profile.unit_name:
                     enabled = check_systemd_unit_enabled(profile.unit_name)
-                    label = self.strings["disable"] if enabled else self.strings["enable"]
-                    GLib.idle_add(widgets["enable_btn"].set_label, label)
-            if "start_btn" in widgets:
+                    GLib.idle_add(btn_enable.set_label, self.strings["disable"] if enabled else self.strings["enable"])
+            if hasattr(self, f"btn_start_{st.value}"):
+                btn_start = getattr(self, f"btn_start_{st.value}")
                 if profile.unit_name:
                     active = check_systemd_unit_active(profile.unit_name)
-                    label = self.strings["stop"] if active else self.strings["start"]
-                    GLib.idle_add(widgets["start_btn"].set_label, label)
+                    GLib.idle_add(btn_start.set_label, self.strings["stop"] if active else self.strings["start"])
 
-        def refresh_all_states(self):
-            for st in ServiceType:
+        def refresh_all(self):
+            for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]:
                 self.refresh_service_state(st)
 
         def poll_services_loop(self):
             while self.polling:
-                for st in ServiceType:
+                for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]:
                     self.refresh_service_state(st)
                 time.sleep(5)
 
