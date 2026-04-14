@@ -275,14 +275,23 @@ def get_downloads_dir() -> str:
 # ============================================================================
 def run_tui():
     """Launch the Textual TUI for AI Services Management."""
+    # Auto-install textual if missing
     try:
-        from textual.app import App, ComposeResult
-        from textual.containers import Container, Horizontal, ScrollableContainer
-        from textual.widgets import Header, Footer, Button, Static
-        from textual import events
+        import textual
     except ImportError:
-        print("Textual not installed. Please install python-textual for TUI support.")
-        sys.exit(1)
+        print("Textual library is missing. Installing TUI dependencies... Please wait.")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "textual"])
+            print("Installation complete. Launching TUI...")
+        except Exception as e:
+            print(f"Failed to install textual: {e}")
+            sys.exit(1)
+
+    # Now safe to import
+    from textual.app import App, ComposeResult
+    from textual.containers import Container, Horizontal, ScrollableContainer
+    from textual.widgets import Header, Footer, Button, Static
+    from textual import events
 
     class ServicePanel(Static):
         """A widget representing one service with controls."""
@@ -453,10 +462,7 @@ def run_tui():
         def toggle_language(self):
             self.lang = "hu" if self.lang == "en" else "en"
             self.strings = STRINGS[self.lang]
-            # Rebuild UI by re-mounting? For simplicity, we exit and ask user to restart.
-            # But we'll just refresh labels.
             self.refresh_all()
-            # Update button labels that are static
             for btn_id, label_key in [
                 ("refresh", "refresh"),
                 ("lang", "language"),
@@ -465,7 +471,7 @@ def run_tui():
                 btn = self.query_one(f"#{btn_id}", Button)
                 btn.label = self.strings[label_key]
             for st in ServiceType:
-                panel = self.query_one(f"ServicePanel", ServicePanel)  # Not perfect; but fine for demo
+                panel = self.query_one(f"ServicePanel", ServicePanel)
                 panel.strings = self.strings
                 panel.update_status()
 
@@ -503,7 +509,6 @@ def run_tui():
             subprocess.Popen(cmd, shell=True)
 
         def start_kohya_cpu(self):
-            # TUI confirmation not implemented; proceed directly.
             cmd = 'tilix -t "Kohya CPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=\\"\\"; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
             subprocess.Popen(cmd, shell=True)
 
