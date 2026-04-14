@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Manjaro Awesome Respin Welcome - AI Services Manager
-Merged UI structure from manage-services.py with full service logic.
-Hybrid GTK3 (GUI) / Textual (TUI) with Nord theme, bilingual (EN/HU).
+Refactored: smart env detection, arrow-key navigation, --test dry-run mode.
 """
 import os
 import subprocess
@@ -10,6 +9,7 @@ import threading
 import sys
 import webbrowser
 import time
+import argparse
 from enum import Enum
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Callable, Any
@@ -121,6 +121,8 @@ STRINGS = {
         "install_manjaro": "Install Manjaro Linux",
         "live_env": "(Running in Live Environment)",
         "error": "Error",
+        "dry_run_title": "Dry Run",
+        "dry_run_text": "Would execute:\n\n{command}",
     },
     "hu": {
         "window_title": "AI Szolgáltatáskezelő",
@@ -180,8 +182,16 @@ STRINGS = {
         "install_manjaro": "Manjaro Linux telepítése",
         "live_env": "(Élő környezetben fut)",
         "error": "Hiba",
+        "dry_run_title": "Próbaüzem",
+        "dry_run_text": "Végrehajtaná:\n\n{command}",
     }
 }
+
+# ============================================================================
+# GLOBAL FLAGS (set by argparse)
+# ============================================================================
+DRY_RUN = False
+UI_MODE = None  # "gui" or "tui"
 
 # ============================================================================
 # SERVICE PROFILES REGISTRY
@@ -219,8 +229,7 @@ SERVICE_REGISTRY = {
         user="diffusion",
         group="diffusion",
         python_version="3.10",
-        # Install command: runs setup.sh from correct directory, creates marker
-        install_cmd='tilix -t "Installing Kohya_ss" -e "bash -c \'cd /opt/kohya_ss && sudo -u diffusion -H ./setup.sh && touch /opt/kohya_ss/.setup_done; echo Press Enter to close; read\'"',
+        install_cmd='cd /opt/kohya_ss && sudo -u diffusion -H ./setup.sh && touch /opt/kohya_ss/.setup_done',
         requires_setup_done=True,
         special_controls=["gpu_cpu", "mc", "inspect"]
     ),
@@ -232,7 +241,7 @@ SERVICE_REGISTRY = {
         user="diffusion",
         group="diffusion",
         python_version="3.10",
-        install_cmd='tilix -t "Installing SD Forge" -e "sudo -u diffusion -g diffusion /bin/bash -c \'cd /opt/stable-diffusion-webui-forge && umask 007 && ./webui.sh && touch /opt/stable-diffusion-webui-forge/.setup_done; echo Press Enter to close; read\'"',
+        install_cmd='sudo -u diffusion -g diffusion /bin/bash -c \'cd /opt/stable-diffusion-webui-forge && umask 007 && ./webui.sh && touch /opt/stable-diffusion-webui-forge/.setup_done\'',
         requires_setup_done=True,
         special_controls=["extensions", "mc"]
     ),
@@ -244,7 +253,7 @@ SERVICE_REGISTRY = {
         user="diffusion",
         group="diffusion",
         python_version="3.13",
-        install_cmd='tilix -t "Installing ComfyUI" -e "bash -c \'cd /opt/ComfyUI && sudo -u diffusion -H ./setup.sh && touch /opt/ComfyUI/.setup_done; echo Press Enter to close; read\'"',
+        install_cmd='cd /opt/ComfyUI && sudo -u diffusion -H ./setup.sh && touch /opt/ComfyUI/.setup_done',
         requires_setup_done=True,
         special_controls=["mc"]
     ),
@@ -255,7 +264,7 @@ SERVICE_REGISTRY = {
         unit_name="ollama.service",
         user="root",
         group="root",
-        install_cmd='tilix -t "Installing Ollama" -e "bash -c \'curl -fsSL https://ollama.com/install.sh | sh && mkdir -p /opt/ollama && touch /opt/ollama/.setup_done; echo Press Enter to close; read\'"',
+        install_cmd='curl -fsSL https://ollama.com/install.sh | sh && mkdir -p /opt/ollama && touch /opt/ollama/.setup_done',
         requires_setup_done=True,
         special_controls=[]
     ),
@@ -296,8 +305,80 @@ def check_setup_done(path: str) -> bool:
 def has_gui() -> bool:
     return bool(os.environ.get("DISPLAY")) or bool(os.environ.get("WAYLAND_DISPLAY"))
 
+def is_ssh_session() -> bool:
+    return bool(os.environ.get("SSH_TTY") or os.environ.get("SSH_CLIENT"))
+
 def get_downloads_dir() -> str:
     return os.path.expanduser("~/Downloads")
+
+# ============================================================================
+# SMART COMMAND EXECUTION (Centralized)
+# ============================================================================
+def execute_command(cmd_string: str, title: str = "Command", parent_gui=None, tui_app=None):
+    """
+    Execute command based on environment (GUI/TTY/SSH) and DRY_RUN flag.
+    - GUI (DISPLAY present and not SSH): launches tilix with command.
+    - TTY/SSH: runs command directly in current terminal.
+    - Dry Run: displays command in a dialog (GTK or TUI modal).
+    """
+    global DRY_RUN, UI_MODE
+
+    if DRY_RUN:
+        if UI_MODE == "gui":
+            if parent_gui:
+                import gi
+                gi.require_version("Gtk", "3.0")
+                from gi.repository import Gtk, GLib
+                dialog = Gtk.MessageDialog(
+                    transient_for=parent_gui,
+                    flags=0,
+                    message_type=Gtk.MessageType.INFO,
+                    buttons=Gtk.ButtonsType.OK,
+                    text=STRINGS[parent_gui.lang]["dry_run_title"]
+                )
+                dialog.format_secondary_text(STRINGS[parent_gui.lang]["dry_run_text"].format(command=cmd_string))
+                dialog.run()
+                dialog.destroy()
+        elif UI_MODE == "tui":
+            if tui_app:
+                class DryRunModal(tui_app.__class__.ModalScreen if hasattr(tui_app.__class__, 'ModalScreen') else object):
+                    # We'll define a simple modal inside the TUI section
+                    pass
+                # This will be implemented inside TUI section where we have access to textual
+                from textual.screen import ModalScreen
+                from textual.widgets import Static, Button
+                from textual.containers import Container, Horizontal
+                class DryRunModal(ModalScreen):
+                    def __init__(self, command: str, lang: str):
+                        super().__init__()
+                        self.command = command
+                        self.lang = lang
+
+                    def compose(self):
+                        yield Container(
+                            Static(STRINGS[self.lang]["dry_run_text"].format(command=self.command), classes="dryrun-message"),
+                            Horizontal(
+                                Button("OK", variant="primary", id="ok"),
+                                classes="dryrun-buttons"
+                            ),
+                            classes="dryrun-dialog"
+                        )
+
+                    def on_button_pressed(self, event):
+                        self.dismiss()
+
+                tui_app.push_screen(DryRunModal(cmd_string, tui_app.lang.current))
+        return
+
+    # Real execution
+    if has_gui() and not is_ssh_session():
+        # GUI mode: use tilix
+        cmd = f'tilix -t "{title}" -e "bash -c \'{cmd_string}; echo; echo Press Enter to close; read\'"'
+    else:
+        # TTY/SSH mode: run directly
+        cmd = f'bash -c "{cmd_string}; echo; echo Press Enter to close; read"'
+
+    subprocess.Popen(cmd, shell=True)
 
 # ============================================================================
 # KOHYA-SPECIFIC LIFECYCLE (EXACT BASH EQUIVALENT)
@@ -314,10 +395,7 @@ def stop_kohya_session():
 
 def start_kohya_session(mode: str = "gpu"):
     """
-    Start Kohya in a byobu session exactly as Bash does:
-    - Stop existing unit/session
-    - Wait 1s
-    - Launch with correct CUDA_VISIBLE_DEVICES
+    Start Kohya in a byobu session exactly as Bash does.
     """
     stop_kohya_session()
     time.sleep(1)
@@ -332,7 +410,6 @@ def start_kohya_session(mode: str = "gpu"):
 
 def inspect_kohya_session():
     """Attach to the Kohya byobu session (like Bash)."""
-    # Bash has a 3-second delay with a message; we replicate that.
     print("Attaching to Kohya terminal in 3 seconds... Press Ctrl+A then D to detach.")
     time.sleep(3)
     subprocess.run(["sudo", "-u", KOHYA_USER, "byobu", "attach", "-t", KOHYA_SESSION])
@@ -343,10 +420,13 @@ def restart_kohya_session(mode: str = "gpu"):
     start_kohya_session(mode)
 
 # ============================================================================
-# TUI IMPLEMENTATION (Textual, with auto-install)
+# TUI IMPLEMENTATION (Textual)
 # ============================================================================
 def run_tui():
     """Launch the Textual TUI for AI Services Management."""
+    global UI_MODE
+    UI_MODE = "tui"
+
     # Auto-install textual if missing
     try:
         import textual
@@ -376,6 +456,7 @@ def run_tui():
     from textual import events
     from textual.screen import ModalScreen
     from textual.message import Message
+    from textual.binding import Binding
 
     class ConfirmDialog(ModalScreen):
         """Simple confirmation dialog for CPU mode warning."""
@@ -399,6 +480,26 @@ def run_tui():
                 self.dismiss(True)
             else:
                 self.dismiss(False)
+
+    class DryRunModal(ModalScreen):
+        """Modal to show dry-run command."""
+        def __init__(self, command: str, lang: str):
+            super().__init__()
+            self.command = command
+            self.lang = lang
+
+        def compose(self) -> ComposeResult:
+            yield Container(
+                Static(STRINGS[self.lang]["dry_run_text"].format(command=self.command), classes="dryrun-message"),
+                Horizontal(
+                    Button("OK", variant="primary", id="ok"),
+                    classes="dryrun-buttons"
+                ),
+                classes="dryrun-dialog"
+            )
+
+        def on_button_pressed(self, event: Button.Pressed):
+            self.dismiss()
 
     class ServiceWidget(Static):
         """A widget representing one service with controls."""
@@ -441,7 +542,6 @@ def run_tui():
                     if self.service_type == ServiceType.OLLAMA:
                         yield Button(self.lang.t("open_dockge"), id="open-dockge",
                                      tooltip=self.lang.t("tooltip_open_dockge"))
-                # Docker is handled in separate tab
 
         def on_mount(self):
             self.update_status()
@@ -467,7 +567,6 @@ def run_tui():
                 else:
                     installed = os.path.isdir(profile.path)
             else:
-                # Docker doesn't have a path; handled separately
                 installed = False
             if not installed:
                 parts.append(self.lang.t("not_installed"))
@@ -512,71 +611,77 @@ def run_tui():
         def install_service(self, st):
             profile = SERVICE_REGISTRY[st]
             if profile.install_cmd:
-                subprocess.Popen(profile.install_cmd, shell=True)
+                execute_command(profile.install_cmd, f"Installing {profile.key}", tui_app=self.app)
 
         def toggle_enable(self, st):
             profile = SERVICE_REGISTRY[st]
             if profile.unit_name:
                 if check_systemd_unit_enabled(profile.unit_name):
-                    run_command(["sudo", "systemctl", "disable", "--now", profile.unit_name])
+                    execute_command(f"sudo systemctl disable --now {profile.unit_name}", f"Disable {profile.key}", tui_app=self.app)
                 else:
-                    run_command(["sudo", "systemctl", "enable", "--now", profile.unit_name])
+                    execute_command(f"sudo systemctl enable --now {profile.unit_name}", f"Enable {profile.key}", tui_app=self.app)
                 self.update_status()
 
         def toggle_start_stop(self, st):
             profile = SERVICE_REGISTRY[st]
             if profile.unit_name:
                 if st == ServiceType.KOHYA:
-                    # Use Bash-equivalent lifecycle for Kohya
                     if check_systemd_unit_active(profile.unit_name):
-                        stop_kohya_session()
+                        # Stop
+                        execute_command(f"sudo systemctl stop {KOHYA_UNIT}; sudo -u {KOHYA_USER} byobu kill-session -t {KOHYA_SESSION}", "Stop Kohya", tui_app=self.app)
                     else:
-                        start_kohya_session("gpu")  # default GPU mode for simple start
+                        # Start GPU
+                        env_var = 'export CUDA_VISIBLE_DEVICES="0"'
+                        cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
+                        execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya (GPU)", tui_app=self.app)
                 else:
                     if check_systemd_unit_active(profile.unit_name):
-                        run_command(["sudo", "systemctl", "stop", profile.unit_name])
+                        execute_command(f"sudo systemctl stop {profile.unit_name}", f"Stop {profile.key}", tui_app=self.app)
                     else:
-                        run_command(["sudo", "systemctl", "start", profile.unit_name])
+                        execute_command(f"sudo systemctl start {profile.unit_name}", f"Start {profile.key}", tui_app=self.app)
                 self.update_status()
 
         def restart_service(self, st):
             profile = SERVICE_REGISTRY[st]
             if profile.unit_name:
                 if st == ServiceType.KOHYA:
-                    restart_kohya_session("gpu")
+                    env_var = 'export CUDA_VISIBLE_DEVICES="0"'
+                    cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
+                    execute_command(f"sudo systemctl stop {KOHYA_UNIT}; sudo -u {KOHYA_USER} byobu kill-session -t {KOHYA_SESSION}; sleep 2; sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Restart Kohya", tui_app=self.app)
                 else:
-                    run_command(["sudo", "systemctl", "restart", profile.unit_name])
+                    execute_command(f"sudo systemctl restart {profile.unit_name}", f"Restart {profile.key}", tui_app=self.app)
                 self.update_status()
 
         def start_kohya_gpu(self):
-            start_kohya_session("gpu")
+            env_var = 'export CUDA_VISIBLE_DEVICES="0"'
+            cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
+            execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya GPU", tui_app=self.app)
             self.update_status()
 
         def start_kohya_cpu(self):
             def run_cpu():
-                start_kohya_session("cpu")
+                env_var = 'export CUDA_VISIBLE_DEVICES=""'
+                cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
+                execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya CPU", tui_app=self.app)
                 self.update_status()
 
             self.app.push_screen(ConfirmDialog(self.lang.t("cpu_warning_text")), callback=lambda result: run_cpu() if result else None)
 
         def inspect_kohya(self):
-            # Launch inspect in a terminal so user can see output and detach.
-            cmd = f'tilix -t "Kohya Inspect" -e "bash -c \'echo Attaching to Kohya session...; sleep 3; sudo -u diffusion byobu attach -t kohya_ss; read\'"'
-            subprocess.Popen(cmd, shell=True)
+            execute_command(f"echo 'Attaching to Kohya session...'; sleep 3; sudo -u {KOHYA_USER} byobu attach -t {KOHYA_SESSION}", "Inspect Kohya", tui_app=self.app)
 
         def open_mc(self, st):
             profile = SERVICE_REGISTRY[st]
             if profile.path:
                 downloads = os.path.expanduser("~/Downloads")
-                subprocess.Popen(f"tilix -e mc {downloads} {profile.path}", shell=True)
+                execute_command(f"mc {downloads} {profile.path}", f"MC: {profile.key}", tui_app=self.app)
 
         def install_extensions(self):
             script = "/usr/local/bin/manage-services.sh"
             if not os.path.exists(script):
                 script = os.path.join(CURRENT_DIR, "manage-services.sh")
             if os.path.exists(script):
-                cmd = f'tilix -t "Installing Forge Extensions" -e "bash -c \'sudo {script} exts sdwebui; read\'"'
-                subprocess.Popen(cmd, shell=True)
+                execute_command(f"sudo {script} exts sdwebui", "Install Forge Extensions", tui_app=self.app)
 
     class DockerWidget(Static):
         def __init__(self, lang_mgr):
@@ -593,9 +698,9 @@ def run_tui():
 
         def on_button_pressed(self, event: Button.Pressed):
             if event.button.id == "install-docker":
-                subprocess.Popen('tilix -e "bash -c \'sudo pacman -S --needed docker docker-compose; sudo systemctl enable --now docker; read\'"', shell=True)
+                execute_command("sudo pacman -S --needed docker docker-compose && sudo systemctl enable --now docker", "Install Docker", tui_app=self.app)
             elif event.button.id == "spin-dockge":
-                subprocess.Popen('tilix -e "bash -c \'sudo docker compose -f /docker/dockge/docker-compose.yml up -d && sleep 30 && xdg-open http://localhost:5001; read\'"', shell=True)
+                execute_command("sudo docker compose -f /docker/dockge/docker-compose.yml up -d && sleep 30 && xdg-open http://localhost:5001", "Start Dockge", tui_app=self.app)
 
     class LanguageManager:
         def __init__(self, app, initial="en"):
@@ -610,9 +715,11 @@ def run_tui():
 
     class AIServicesManagerTUI(App):
         BINDINGS = [
-            ("ctrl+q", "quit", "Quit"),
-            ("escape", "back", "Back"),
-            ("l", "toggle_language", "Toggle Language"),
+            Binding("ctrl+q", "quit", "Quit"),
+            Binding("escape", "back", "Back"),
+            Binding("l", "toggle_language", "Toggle Language"),
+            Binding("up,left", "focus_previous", "Previous"),
+            Binding("down,right,tab", "focus_next", "Next"),
         ]
 
         CSS = f"""
@@ -662,6 +769,21 @@ def run_tui():
             margin-top: 1;
             align: center middle;
         }}
+        .dryrun-dialog {{
+            background: {NORD_COLORS['dark1']};
+            border: thick {NORD_COLORS['frost1']};
+            padding: 2;
+            margin: 10 20;
+        }}
+        .dryrun-message {{
+            color: {NORD_COLORS['light1']};
+            padding: 1;
+            white-space: pre;
+        }}
+        .dryrun-buttons {{
+            margin-top: 1;
+            align: center middle;
+        }}
         """
 
         def __init__(self):
@@ -694,7 +816,6 @@ def run_tui():
 
         def action_toggle_language(self):
             self.lang.toggle()
-            # Update tab labels
             tabbed = self.query_one(TabbedContent)
             for i, st in enumerate([ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]):
                 profile = SERVICE_REGISTRY[st]
@@ -705,12 +826,16 @@ def run_tui():
             self.refresh_all()
 
         def action_quit(self) -> None:
-            """Exit the TUI application."""
             self.exit()
 
         def action_back(self) -> None:
-            """Go back to previous screen; in TUI this is equivalent to exit."""
             self.exit()
+
+        def action_focus_next(self) -> None:
+            self.focus_next()
+
+        def action_focus_previous(self) -> None:
+            self.focus_previous()
 
     app = AIServicesManagerTUI()
     app.run()
@@ -720,6 +845,9 @@ def run_tui():
 # ============================================================================
 def run_gui():
     """Launch the GTK3 GUI for AwesomeWelcome and AI Services Manager."""
+    global UI_MODE
+    UI_MODE = "gui"
+
     import gi
     gi.require_version("Gtk", "3.0")
     from gi.repository import Gtk, Gdk, GLib, Pango
@@ -755,7 +883,7 @@ def run_gui():
             self.lang = "en"
             self.strings = STRINGS[self.lang]
             self.polling = False
-            self.parent_welcome = parent_welcome  # Store reference to welcome window
+            self.parent_welcome = parent_welcome
 
             css_provider = Gtk.CssProvider()
             css_provider.load_from_data(CSS_DATA.encode('utf-8'))
@@ -780,7 +908,6 @@ def run_gui():
             refresh_btn.connect("clicked", lambda x: self.refresh_all())
             header.pack_end(refresh_btn)
 
-            # Add explicit Close button in header bar (always visible)
             close_btn = Gtk.Button(label=self.strings["close"])
             close_btn.connect("clicked", self.on_close_clicked)
             header.pack_start(close_btn)
@@ -798,11 +925,9 @@ def run_gui():
             self.connect("destroy", self.on_destroy)
 
         def on_close_clicked(self, btn):
-            """Handle explicit close button press."""
             self.destroy()
 
         def on_destroy(self, widget):
-            """Called when window is destroyed (either by close button or 'X')."""
             self.polling = False
             if self.parent_welcome:
                 self.parent_welcome.show()
@@ -816,7 +941,6 @@ def run_gui():
             self.update_ui_language()
 
         def update_ui_language(self):
-            # Update tab labels
             for i, st in enumerate([ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]):
                 profile = SERVICE_REGISTRY[st]
                 page = self.notebook.get_nth_page(i)
@@ -825,18 +949,15 @@ def run_gui():
             docker_page = self.notebook.get_nth_page(4)
             label = self.notebook.get_tab_label(docker_page)
             label.set_text(self.strings["service_docker"])
-            # Update button tooltips and labels
             self.refresh_all()
 
         def create_service_tabs(self):
-            # Tab for each service
             for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]:
                 profile = SERVICE_REGISTRY[st]
                 page = self.create_service_page(st, profile)
                 label = Gtk.Label(label=self.strings[profile.display_name_key])
                 self.notebook.append_page(page, label)
 
-            # Docker tools tab
             docker_page = self.create_docker_page()
             label = Gtk.Label(label=self.strings["service_docker"])
             self.notebook.append_page(docker_page, label)
@@ -848,7 +969,6 @@ def run_gui():
             box.set_margin_start(10)
             box.set_margin_end(10)
 
-            # Title and status
             hbox_title = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
             title_label = Gtk.Label()
             title_label.get_style_context().add_class("service-title")
@@ -860,14 +980,12 @@ def run_gui():
             hbox_title.pack_end(status_label, False, False, 0)
             box.pack_start(hbox_title, False, False, 0)
 
-            # Buttons container
             btn_box = Gtk.FlowBox()
             btn_box.set_selection_mode(Gtk.SelectionMode.NONE)
             btn_box.set_homogeneous(False)
             btn_box.set_column_spacing(5)
             btn_box.set_row_spacing(5)
 
-            # Install
             if profile.install_cmd:
                 btn_install = Gtk.Button(label=self.strings["install"])
                 btn_install.get_style_context().add_class("service-button")
@@ -876,7 +994,6 @@ def run_gui():
                 btn_box.add(btn_install)
                 setattr(self, f"btn_install_{st.value}", btn_install)
 
-            # Enable/Disable
             if profile.unit_name:
                 btn_enable = Gtk.Button(label="...")
                 btn_enable.get_style_context().add_class("service-button")
@@ -899,7 +1016,6 @@ def run_gui():
                 btn_box.add(btn_restart)
                 setattr(self, f"btn_restart_{st.value}", btn_restart)
 
-            # Kohya special
             if st == ServiceType.KOHYA:
                 btn_gpu = Gtk.Button(label=self.strings["start_gpu"])
                 btn_gpu.get_style_context().add_class("service-button")
@@ -922,7 +1038,6 @@ def run_gui():
                 btn_box.add(btn_inspect)
                 self.btn_kohya_inspect = btn_inspect
 
-            # MC button
             if "mc" in profile.special_controls and profile.path:
                 btn_mc = Gtk.Button(label=self.strings["open_mc"])
                 btn_mc.get_style_context().add_class("service-button")
@@ -931,7 +1046,6 @@ def run_gui():
                 btn_box.add(btn_mc)
                 setattr(self, f"btn_mc_{st.value}", btn_mc)
 
-            # Extensions button
             if "extensions" in profile.special_controls:
                 btn_exts = Gtk.Button(label=self.strings["install_extensions"])
                 btn_exts.get_style_context().add_class("service-button")
@@ -940,7 +1054,6 @@ def run_gui():
                 btn_box.add(btn_exts)
                 setattr(self, f"btn_exts_{st.value}", btn_exts)
 
-            # Ollama Dockge button
             if st == ServiceType.OLLAMA:
                 btn_dockge = Gtk.Button(label=self.strings["open_dockge"])
                 btn_dockge.get_style_context().add_class("service-button")
@@ -951,7 +1064,6 @@ def run_gui():
 
             box.pack_start(btn_box, False, False, 0)
 
-            # Store status label
             setattr(self, f"status_label_{st.value}", status_label)
 
             return box
@@ -983,11 +1095,10 @@ def run_gui():
 
             return box
 
-        # Service actions
         def on_install_clicked(self, btn, st):
             profile = SERVICE_REGISTRY[st]
             if profile.install_cmd:
-                subprocess.Popen(profile.install_cmd, shell=True)
+                execute_command(profile.install_cmd, f"Installing {profile.key}", parent_gui=self)
 
         def on_toggle_enable(self, btn, st):
             profile = SERVICE_REGISTRY[st]
@@ -995,9 +1106,9 @@ def run_gui():
                 return
             is_enabled = check_systemd_unit_enabled(profile.unit_name)
             if is_enabled:
-                run_command(["sudo", "systemctl", "disable", "--now", profile.unit_name])
+                execute_command(f"sudo systemctl disable --now {profile.unit_name}", f"Disable {profile.key}", parent_gui=self)
             else:
-                run_command(["sudo", "systemctl", "enable", "--now", profile.unit_name])
+                execute_command(f"sudo systemctl enable --now {profile.unit_name}", f"Enable {profile.key}", parent_gui=self)
             self.refresh_service_state(st)
 
         def on_toggle_start_stop(self, btn, st):
@@ -1005,30 +1116,35 @@ def run_gui():
             if not profile.unit_name:
                 return
             if st == ServiceType.KOHYA:
-                # Use Bash-equivalent lifecycle for Kohya
                 if check_systemd_unit_active(profile.unit_name):
-                    stop_kohya_session()
+                    execute_command(f"sudo systemctl stop {KOHYA_UNIT}; sudo -u {KOHYA_USER} byobu kill-session -t {KOHYA_SESSION}", "Stop Kohya", parent_gui=self)
                 else:
-                    start_kohya_session("gpu")
+                    env_var = 'export CUDA_VISIBLE_DEVICES="0"'
+                    cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
+                    execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya (GPU)", parent_gui=self)
             else:
                 is_active = check_systemd_unit_active(profile.unit_name)
                 if is_active:
-                    run_command(["sudo", "systemctl", "stop", profile.unit_name])
+                    execute_command(f"sudo systemctl stop {profile.unit_name}", f"Stop {profile.key}", parent_gui=self)
                 else:
-                    run_command(["sudo", "systemctl", "start", profile.unit_name])
+                    execute_command(f"sudo systemctl start {profile.unit_name}", f"Start {profile.key}", parent_gui=self)
             self.refresh_service_state(st)
 
         def on_restart(self, btn, st):
             profile = SERVICE_REGISTRY[st]
             if profile.unit_name:
                 if st == ServiceType.KOHYA:
-                    restart_kohya_session("gpu")
+                    env_var = 'export CUDA_VISIBLE_DEVICES="0"'
+                    cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
+                    execute_command(f"sudo systemctl stop {KOHYA_UNIT}; sudo -u {KOHYA_USER} byobu kill-session -t {KOHYA_SESSION}; sleep 2; sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Restart Kohya", parent_gui=self)
                 else:
-                    run_command(["sudo", "systemctl", "restart", profile.unit_name])
+                    execute_command(f"sudo systemctl restart {profile.unit_name}", f"Restart {profile.key}", parent_gui=self)
                 self.refresh_service_state(st)
 
         def on_start_kohya_gpu(self, btn):
-            start_kohya_session("gpu")
+            env_var = 'export CUDA_VISIBLE_DEVICES="0"'
+            cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
+            execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya GPU", parent_gui=self)
             self.refresh_service_state(ServiceType.KOHYA)
 
         def on_start_kohya_cpu(self, btn):
@@ -1043,20 +1159,20 @@ def run_gui():
             response = dialog.run()
             dialog.destroy()
             if response == Gtk.ResponseType.OK:
-                start_kohya_session("cpu")
+                env_var = 'export CUDA_VISIBLE_DEVICES=""'
+                cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
+                execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya CPU", parent_gui=self)
                 self.refresh_service_state(ServiceType.KOHYA)
 
         def on_inspect_kohya(self, btn):
-            cmd = f'tilix -t "Kohya Inspect" -e "bash -c \'echo Attaching to Kohya session...; sleep 3; sudo -u diffusion byobu attach -t kohya_ss; read\'"'
-            subprocess.Popen(cmd, shell=True)
+            execute_command(f"echo 'Attaching to Kohya session...'; sleep 3; sudo -u {KOHYA_USER} byobu attach -t {KOHYA_SESSION}", "Inspect Kohya", parent_gui=self)
 
         def on_open_mc(self, btn, st):
             profile = SERVICE_REGISTRY[st]
             if not profile.path:
                 return
             downloads = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) or os.path.expanduser("~/Downloads")
-            cmd = f'tilix -e mc {downloads} {profile.path}'
-            subprocess.Popen(cmd, shell=True)
+            execute_command(f"mc {downloads} {profile.path}", f"MC: {profile.key}", parent_gui=self)
 
         def on_install_extensions(self, btn, st):
             if st == ServiceType.FORGE:
@@ -1064,16 +1180,13 @@ def run_gui():
                 if not os.path.exists(script):
                     script = os.path.join(CURRENT_DIR, "manage-services.sh")
                 if os.path.exists(script):
-                    cmd = f'tilix -t "Installing Forge Extensions" -e "bash -c \'sudo {script} exts sdwebui; read\'"'
-                    subprocess.Popen(cmd, shell=True)
+                    execute_command(f"sudo {script} exts sdwebui", "Install Forge Extensions", parent_gui=self)
 
         def on_install_docker(self, btn):
-            cmd = 'tilix -t "Installing Docker" -e "bash -c \'sudo pacman -S --needed docker docker-compose; sudo systemctl enable --now docker; read\'"'
-            subprocess.Popen(cmd, shell=True)
+            execute_command("sudo pacman -S --needed docker docker-compose && sudo systemctl enable --now docker", "Install Docker", parent_gui=self)
 
         def on_spin_dockge(self, btn):
-            cmd = 'tilix -t "Starting Dockge" -e "bash -c \'sudo docker compose -f /docker/dockge/docker-compose.yml up -d && sleep 30 && xdg-open http://localhost:5001; read\'"'
-            subprocess.Popen(cmd, shell=True)
+            execute_command("sudo docker compose -f /docker/dockge/docker-compose.yml up -d && sleep 30 && xdg-open http://localhost:5001", "Start Dockge", parent_gui=self)
 
         def refresh_service_state(self, st: ServiceType):
             profile = SERVICE_REGISTRY[st]
@@ -1101,7 +1214,6 @@ def run_gui():
                     status_parts.append("Installed")
             GLib.idle_add(status_label.set_label, " | ".join(status_parts))
 
-            # Update button labels and tooltips with current language strings
             if hasattr(self, f"btn_enable_{st.value}"):
                 btn_enable = getattr(self, f"btn_enable_{st.value}")
                 if profile.unit_name:
@@ -1136,7 +1248,6 @@ def run_gui():
         def refresh_all(self):
             for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]:
                 self.refresh_service_state(st)
-            # Docker page buttons tooltips
             if hasattr(self, 'btn_docker_install'):
                 GLib.idle_add(self.btn_docker_install.set_tooltip_text, self.strings["tooltip_install_docker"])
             if hasattr(self, 'btn_docker_spin'):
@@ -1319,7 +1430,6 @@ def run_gui():
                 self.show_error(f"Failed to launch installer: {e}")
 
         def on_manage_services(self, widget):
-            """Hide welcome window and show services manager."""
             self.hide()
             manager = AIServicesManagerGTK(parent_welcome=self)
             manager.show_all()
@@ -1345,6 +1455,12 @@ def run_gui():
 # MAIN ENTRY POINT
 # ============================================================================
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Manjaro Awesome Respin Welcome")
+    parser.add_argument("--test", action="store_true", help="Dry run mode: show commands without executing")
+    args = parser.parse_args()
+
+    DRY_RUN = args.test
+
     if has_gui():
         run_gui()
     else:
