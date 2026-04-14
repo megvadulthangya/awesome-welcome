@@ -778,7 +778,6 @@ def run_tui():
         .dryrun-message {{
             color: {NORD_COLORS['light1']};
             padding: 1;
-            white-space: pre;
         }}
         .dryrun-buttons {{
             margin-top: 1;
