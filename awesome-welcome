@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Manjaro Awesome Respin Welcome - AI Services Manager
-Refactored: smart env detection, arrow-key navigation, --test dry-run mode.
+Refactored: smart env detection, arrow-key navigation, --test dry-run mode, --tui force terminal.
 """
 import os
 import subprocess
@@ -341,10 +341,6 @@ def execute_command(cmd_string: str, title: str = "Command", parent_gui=None, tu
                 dialog.destroy()
         elif UI_MODE == "tui":
             if tui_app:
-                class DryRunModal(tui_app.__class__.ModalScreen if hasattr(tui_app.__class__, 'ModalScreen') else object):
-                    # We'll define a simple modal inside the TUI section
-                    pass
-                # This will be implemented inside TUI section where we have access to textual
                 from textual.screen import ModalScreen
                 from textual.widgets import Static, Button
                 from textual.containers import Container, Horizontal
@@ -627,10 +623,8 @@ def run_tui():
             if profile.unit_name:
                 if st == ServiceType.KOHYA:
                     if check_systemd_unit_active(profile.unit_name):
-                        # Stop
                         execute_command(f"sudo systemctl stop {KOHYA_UNIT}; sudo -u {KOHYA_USER} byobu kill-session -t {KOHYA_SESSION}", "Stop Kohya", tui_app=self.app)
                     else:
-                        # Start GPU
                         env_var = 'export CUDA_VISIBLE_DEVICES="0"'
                         cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
                         execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya (GPU)", tui_app=self.app)
@@ -829,12 +823,6 @@ def run_tui():
 
         def action_back(self) -> None:
             self.exit()
-
-        def action_focus_next(self) -> None:
-            self.focus_next()
-
-        def action_focus_previous(self) -> None:
-            self.focus_previous()
 
     app = AIServicesManagerTUI()
     app.run()
@@ -1456,11 +1444,14 @@ def run_gui():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Manjaro Awesome Respin Welcome")
     parser.add_argument("--test", action="store_true", help="Dry run mode: show commands without executing")
+    parser.add_argument("--tui", action="store_true", help="Force TUI mode even if DISPLAY is available")
     args = parser.parse_args()
 
     DRY_RUN = args.test
 
-    if has_gui():
+    if args.tui:
+        run_tui()
+    elif has_gui() and not is_ssh_session():
         run_gui()
     else:
         run_tui()
