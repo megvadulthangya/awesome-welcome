@@ -442,30 +442,56 @@ def run_tui():
 
         def toggle_start_stop(self, st):
             profile = SERVICE_REGISTRY[st]
-            if profile.unit_name:
+            if not profile.unit_name:
+                return
+            # Special handling for Kohya: use Bash-like start/stop logic
+            if st == ServiceType.KOHYA:
                 if check_systemd_unit_active(profile.unit_name):
-                    run_command(["sudo", "systemctl", "stop", profile.unit_name])
+                    self.stop_kohya()
                 else:
-                    run_command(["sudo", "systemctl", "start", profile.unit_name])
+                    self.start_kohya_gpu()
                 self.update_status()
+                return
+            # Default systemctl for other services
+            if check_systemd_unit_active(profile.unit_name):
+                run_command(["sudo", "systemctl", "stop", profile.unit_name])
+            else:
+                run_command(["sudo", "systemctl", "start", profile.unit_name])
+            self.update_status()
 
         def restart_service(self, st):
             profile = SERVICE_REGISTRY[st]
-            if profile.unit_name:
+            if not profile.unit_name:
+                return
+            if st == ServiceType.KOHYA:
+                self.stop_kohya()
+                time.sleep(2)
+                self.start_kohya_gpu()
+            else:
                 run_command(["sudo", "systemctl", "restart", profile.unit_name])
-                self.update_status()
+            self.update_status()
+
+        def stop_kohya(self):
+            """Stop Kohya: systemd unit + kill byobu session."""
+            run_command(["sudo", "systemctl", "stop", "kohya_ss.service"])
+            run_command(["sudo", "-u", "diffusion", "byobu", "kill-session", "-t", "kohya_ss"])
+            # Wait a moment for cleanup
+            time.sleep(1)
 
         def start_kohya_gpu(self):
+            # First stop any existing instance (clean start)
+            self.stop_kohya()
+            # Start new byobu session with GPU visible
             cmd = 'tilix -t "Kohya GPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=0; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
             subprocess.Popen(cmd, shell=True)
             self.update_status()
 
         def start_kohya_cpu(self):
             def run_cpu():
+                self.stop_kohya()
                 cmd = 'tilix -t "Kohya CPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=\\"\\"; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
                 subprocess.Popen(cmd, shell=True)
                 self.update_status()
-
             self.app.push_screen(ConfirmDialog(self.lang.t("cpu_warning_text")), callback=lambda result: run_cpu() if result else None)
 
         def open_mc(self, st):
@@ -870,7 +896,7 @@ def run_gui():
 
             return box
 
-        # Service actions (same as original)
+        # Service actions (with Kohya overrides)
         def on_install_clicked(self, btn, st):
             profile = SERVICE_REGISTRY[st]
             if profile.install_cmd:
@@ -891,6 +917,15 @@ def run_gui():
             profile = SERVICE_REGISTRY[st]
             if not profile.unit_name:
                 return
+            # Special handling for Kohya
+            if st == ServiceType.KOHYA:
+                if check_systemd_unit_active(profile.unit_name):
+                    self.stop_kohya()
+                else:
+                    self.start_kohya_gpu(btn)
+                self.refresh_service_state(st)
+                return
+            # Default for other services
             is_active = check_systemd_unit_active(profile.unit_name)
             if is_active:
                 run_command(["sudo", "systemctl", "stop", profile.unit_name])
@@ -900,11 +935,24 @@ def run_gui():
 
         def on_restart(self, btn, st):
             profile = SERVICE_REGISTRY[st]
-            if profile.unit_name:
+            if not profile.unit_name:
+                return
+            if st == ServiceType.KOHYA:
+                self.stop_kohya()
+                time.sleep(2)
+                self.start_kohya_gpu(btn)
+            else:
                 run_command(["sudo", "systemctl", "restart", profile.unit_name])
-                self.refresh_service_state(st)
+            self.refresh_service_state(st)
+
+        def stop_kohya(self):
+            """Stop Kohya: systemd unit + kill byobu session."""
+            run_command(["sudo", "systemctl", "stop", "kohya_ss.service"])
+            run_command(["sudo", "-u", "diffusion", "byobu", "kill-session", "-t", "kohya_ss"])
+            time.sleep(1)
 
         def on_start_kohya_gpu(self, btn):
+            self.stop_kohya()
             cmd = 'tilix -t "Kohya GPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=0; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
             subprocess.Popen(cmd, shell=True)
             self.refresh_service_state(ServiceType.KOHYA)
@@ -921,6 +969,7 @@ def run_gui():
             response = dialog.run()
             dialog.destroy()
             if response == Gtk.ResponseType.OK:
+                self.stop_kohya()
                 cmd = 'tilix -t "Kohya CPU Mode" -e "bash -c \'export CUDA_VISIBLE_DEVICES=\\"\\"; sudo -u diffusion -H byobu new-session -d -s kohya_ss \\"/opt/kohya_ss/gui.sh --listen 0.0.0.0 --server_port 7861 --headless\\"; echo Started; read\'"'
                 subprocess.Popen(cmd, shell=True)
                 self.refresh_service_state(ServiceType.KOHYA)
