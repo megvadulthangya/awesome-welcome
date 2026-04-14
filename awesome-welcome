@@ -639,7 +639,7 @@ def run_gui():
     """
 
     class AIServicesManagerGTK(Gtk.Window):
-        def __init__(self):
+        def __init__(self, parent_welcome=None):
             super().__init__(title=STRINGS["en"]["window_title"])
             self.set_default_size(950, 750)
             self.set_position(Gtk.WindowPosition.CENTER)
@@ -648,6 +648,7 @@ def run_gui():
             self.lang = "en"
             self.strings = STRINGS[self.lang]
             self.polling = False
+            self.parent_welcome = parent_welcome  # Store reference to welcome window
 
             css_provider = Gtk.CssProvider()
             css_provider.load_from_data(CSS_DATA.encode('utf-8'))
@@ -672,7 +673,7 @@ def run_gui():
 
             # Add explicit Close button in header bar (always visible)
             close_btn = Gtk.Button(label=self.strings["close"])
-            close_btn.connect("clicked", lambda x: self.destroy())
+            close_btn.connect("clicked", self.on_close_clicked)
             header.pack_start(close_btn)
 
             self.notebook = Gtk.Notebook()
@@ -687,8 +688,15 @@ def run_gui():
             self.show_all()
             self.connect("destroy", self.on_destroy)
 
+        def on_close_clicked(self, btn):
+            """Handle explicit close button press."""
+            self.destroy()
+
         def on_destroy(self, widget):
+            """Called when window is destroyed (either by close button or 'X')."""
             self.polling = False
+            if self.parent_welcome:
+                self.parent_welcome.show()
 
         def on_toggle_language(self, btn):
             self.lang = "hu" if self.lang == "en" else "en"
@@ -1147,7 +1155,9 @@ def run_gui():
                 self.show_error(f"Failed to launch installer: {e}")
 
         def on_manage_services(self, widget):
-            manager = AIServicesManagerGTK()
+            """Hide welcome window and show services manager."""
+            self.hide()
+            manager = AIServicesManagerGTK(parent_welcome=self)
             manager.show_all()
 
         def show_error(self, message):
