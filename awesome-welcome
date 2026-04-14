@@ -193,7 +193,7 @@ SERVICE_REGISTRY = {
         user="diffusion",
         group="diffusion",
         python_version="3.10",
-        install_cmd='tilix -t "Installing Kohya_ss" -e "bash -c \'sudo -u diffusion -H ./setup.sh && touch /opt/kohya_ss/.setup_done; echo Press Enter to close; read\'"',
+        install_cmd='tilix -t "Installing Kohya_ss" -e "bash -c \'cd /opt/kohya_ss && sudo -u diffusion -H ./setup.sh && touch /opt/kohya_ss/.setup_done; echo Press Enter to close; read\'"',
         requires_setup_done=True,
         special_controls=["gpu_cpu", "mc"]
     ),
@@ -224,12 +224,12 @@ SERVICE_REGISTRY = {
     ServiceType.OLLAMA: ServiceProfile(
         key="ollama",
         display_name_key="service_ollama",
-        path=None,
+        path="/opt/ollama",
         unit_name="ollama.service",
         user="root",
         group="root",
-        install_cmd='tilix -t "Installing Ollama" -e "bash -c \'curl -fsSL https://ollama.com/install.sh | sh; echo Press Enter to close; read\'"',
-        requires_setup_done=False,
+        install_cmd='tilix -t "Installing Ollama" -e "bash -c \'curl -fsSL https://ollama.com/install.sh | sh && mkdir -p /opt/ollama && touch /opt/ollama/.setup_done; echo Press Enter to close; read\'"',
+        requires_setup_done=True,
         special_controls=[]
     ),
     ServiceType.DOCKER: ServiceProfile(
@@ -386,7 +386,8 @@ def run_tui():
                 else:
                     installed = os.path.isdir(profile.path)
             else:
-                installed = os.path.exists("/usr/bin/ollama") or os.path.exists("/usr/local/bin/ollama")
+                # Docker doesn't have a path; handled separately
+                installed = False
             if not installed:
                 parts.append(self.lang.t("not_installed"))
             else:
@@ -510,6 +511,11 @@ def run_tui():
             self.current = "hu" if self.current == "en" else "en"
 
     class AIServicesManagerTUI(App):
+        BINDINGS = [
+            ("ctrl+q", "quit", "Quit"),
+            ("escape", "back", "Back"),
+        ]
+
         CSS = f"""
         Screen {{
             background: {NORD_COLORS['dark0']};
@@ -598,6 +604,14 @@ def run_tui():
             docker_pane = tabbed.get_pane(tabbed.children[-1])
             docker_pane.label = self.lang.t("service_docker")
             self.refresh_all()
+
+        def action_quit(self) -> None:
+            """Exit the TUI application."""
+            self.exit()
+
+        def action_back(self) -> None:
+            """Go back to previous screen; in TUI this is equivalent to exit."""
+            self.exit()
 
         def on_key(self, event: events.Key):
             if event.key == "l":
@@ -947,7 +961,7 @@ def run_gui():
                 else:
                     installed = os.path.isdir(profile.path)
             else:
-                installed = os.path.exists("/usr/bin/ollama") or os.path.exists("/usr/local/bin/ollama")
+                installed = False
 
             status_parts = []
             if not installed:
