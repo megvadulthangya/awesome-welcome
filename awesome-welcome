@@ -21,11 +21,6 @@ import json
 APP_TITLE = "Manjaro Awesome Respin Welcome"
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOCAL_WRAPPER = os.path.join(CURRENT_DIR, "xl-wrapper.sh")
-if os.path.exists(LOCAL_WRAPPER):
-    XLIBRE_SCRIPT = LOCAL_WRAPPER
-else:
-    XLIBRE_SCRIPT = "/usr/lib/awesome-welcome/xl-wrapper.sh"
 
 AUTOSTART_DIR = os.path.expanduser("~/.config/autostart")
 AUTOSTART_FILE = os.path.join(AUTOSTART_DIR, "awesome-welcome.desktop")
@@ -310,6 +305,21 @@ def is_ssh_session() -> bool:
 
 def get_downloads_dir() -> str:
     return os.path.expanduser("~/Downloads")
+
+def _forge_extensions_install_command() -> str:
+    """Return shell command to install recommended SD Forge extensions directly."""
+    extensions_dir = "/opt/stable-diffusion-webui-forge/extensions"
+    cmds = [
+        f"mkdir -p {extensions_dir}",
+        f"cd {extensions_dir}",
+        "git clone https://github.com/Mikubill/sd-webui-controlnet.git",
+        "git clone https://github.com/continue-revolution/sd-webui-segment-anything.git",
+        "git clone https://github.com/Bing-su/adetailer.git",
+        "git clone https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111.git",
+        "git clone https://github.com/huchenlei/sd-webui-openpose-editor.git",
+        "git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui-rembg.git",
+    ]
+    return " && ".join(cmds)
 
 # ============================================================================
 # SMART COMMAND EXECUTION (Centralized)
@@ -671,11 +681,7 @@ def run_tui():
                 execute_command(f"mc {downloads} {profile.path}", f"MC: {profile.key}", tui_app=self.app)
 
         def install_extensions(self):
-            script = "/usr/local/bin/manage-services.sh"
-            if not os.path.exists(script):
-                script = os.path.join(CURRENT_DIR, "manage-services.sh")
-            if os.path.exists(script):
-                execute_command(f"sudo {script} exts sdwebui", "Install Forge Extensions", tui_app=self.app)
+            execute_command(_forge_extensions_install_command(), "Install Forge Extensions", tui_app=self.app)
 
     class DockerWidget(Static):
         def __init__(self, lang_mgr):
@@ -1164,11 +1170,7 @@ def run_gui():
 
         def on_install_extensions(self, btn, st):
             if st == ServiceType.FORGE:
-                script = "/usr/local/bin/manage-services.sh"
-                if not os.path.exists(script):
-                    script = os.path.join(CURRENT_DIR, "manage-services.sh")
-                if os.path.exists(script):
-                    execute_command(f"sudo {script} exts sdwebui", "Install Forge Extensions", parent_gui=self)
+                execute_command(_forge_extensions_install_command(), "Install Forge Extensions", parent_gui=self)
 
         def on_install_docker(self, btn):
             execute_command("sudo pacman -S --needed docker docker-compose && sudo systemctl enable --now docker", "Install Docker", parent_gui=self)
