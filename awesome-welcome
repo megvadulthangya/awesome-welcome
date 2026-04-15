@@ -1216,9 +1216,14 @@ def run_gui(services_mode: bool = False):
             self.set_default_size(950, 750)
             self.set_position(Gtk.WindowPosition.CENTER)
             self.set_resizable(True)
+
+            # Initialize state variables FIRST
             self.lang = "en"
             self.strings = STRINGS[self.lang]
+            self.is_live = os.path.exists("/run/miso/bootmnt/manjaro")
+            self.services_mode = services_mode
 
+            # Apply CSS
             css_provider = Gtk.CssProvider()
             css_provider.load_from_data(CSS_DATA.encode('utf-8'))
             Gtk.StyleContext.add_provider_for_screen(
@@ -1227,6 +1232,7 @@ def run_gui(services_mode: bool = False):
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             )
 
+            # Build header
             self.header = Gtk.HeaderBar()
             self.header.set_show_close_button(True)
             self.header.props.title = APP_TITLE
@@ -1248,6 +1254,7 @@ def run_gui(services_mode: bool = False):
             refresh_btn.connect("clicked", lambda x: self.services_manager.refresh_all())
             self.header.pack_end(refresh_btn)
 
+            # Build stack
             self.stack = Gtk.Stack()
             self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
             self.stack.set_transition_duration(200)
@@ -1256,14 +1263,14 @@ def run_gui(services_mode: bool = False):
             self.create_welcome_page()
             self.create_services_page()
 
-            self.is_live = os.path.exists("/run/miso/bootmnt/manjaro")
+            # Adjust visibility based on live mode and services flag
             if self.is_live:
                 self.lang_btn.hide()
                 refresh_btn.hide()
                 self.stack.set_visible_child_name("welcome")
                 self.back_btn.hide()
             else:
-                if services_mode:
+                if self.services_mode:
                     self.stack.set_visible_child_name("services")
                     self.back_btn.show()
                     self.header.props.title = self.strings["window_title"]
