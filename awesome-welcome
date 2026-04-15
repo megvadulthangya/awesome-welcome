@@ -118,6 +118,7 @@ STRINGS = {
         "error": "Error",
         "dry_run_title": "Dry Run",
         "dry_run_text": "Would execute:\n\n{command}",
+        "back": "Back",
     },
     "hu": {
         "window_title": "AI Szolgáltatáskezelő",
@@ -179,6 +180,7 @@ STRINGS = {
         "error": "Hiba",
         "dry_run_title": "Próbaüzem",
         "dry_run_text": "Végrehajtaná:\n\n{command}",
+        "back": "Vissza",
     }
 }
 
@@ -428,7 +430,7 @@ def restart_kohya_session(mode: str = "gpu"):
 # ============================================================================
 # TUI IMPLEMENTATION (Textual)
 # ============================================================================
-def run_tui():
+def run_tui(services_mode: bool = False):
     """Launch the Textual TUI for AI Services Management."""
     global UI_MODE
     UI_MODE = "tui"
@@ -837,7 +839,7 @@ def run_tui():
 # ============================================================================
 # GUI IMPLEMENTATION (GTK3, only loaded when display available)
 # ============================================================================
-def run_gui():
+def run_gui(services_mode: bool = False):
     """Launch the GTK3 GUI for AwesomeWelcome and AI Services Manager."""
     global UI_MODE
     UI_MODE = "gui"
@@ -867,71 +869,30 @@ def run_gui():
     .warning-label {{ color: {NORD_COLORS['red']}; font-size: 12px; }}
     """
 
-    class AIServicesManagerGTK(Gtk.Window):
-        def __init__(self, parent_welcome=None):
-            super().__init__(title=STRINGS["en"]["window_title"])
-            self.set_default_size(950, 750)
-            self.set_position(Gtk.WindowPosition.CENTER)
-            self.set_resizable(True)
-
+    class ServicesManagerWidget(Gtk.Box):
+        """Widget containing all service management UI (formerly AIServicesManagerGTK)."""
+        def __init__(self, parent_window):
+            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            self.parent_window = parent_window
             self.lang = "en"
             self.strings = STRINGS[self.lang]
             self.polling = False
-            self.parent_welcome = parent_welcome
-
-            css_provider = Gtk.CssProvider()
-            css_provider.load_from_data(CSS_DATA.encode('utf-8'))
-            Gtk.StyleContext.add_provider_for_screen(
-                Gdk.Screen.get_default(),
-                css_provider,
-                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-            )
-
-            header = Gtk.HeaderBar()
-            header.set_show_close_button(True)
-            header.props.title = self.strings["window_title"]
-            self.set_titlebar(header)
-
-            self.lang_btn = Gtk.Button(label=self.strings["language"])
-            self.lang_btn.set_tooltip_text(self.strings["tooltip_language"])
-            self.lang_btn.connect("clicked", self.on_toggle_language)
-            header.pack_end(self.lang_btn)
-
-            refresh_btn = Gtk.Button(label=self.strings["refresh"])
-            refresh_btn.set_tooltip_text(self.strings["tooltip_refresh"])
-            refresh_btn.connect("clicked", lambda x: self.refresh_all())
-            header.pack_end(refresh_btn)
-
-            close_btn = Gtk.Button(label=self.strings["close"])
-            close_btn.connect("clicked", self.on_close_clicked)
-            header.pack_start(close_btn)
 
             self.notebook = Gtk.Notebook()
-            self.add(self.notebook)
-
+            self.pack_start(self.notebook, True, True, 0)
             self.create_service_tabs()
 
             self.polling = True
             self.poll_thread = threading.Thread(target=self.poll_services_loop, daemon=True)
             self.poll_thread.start()
 
-            self.show_all()
-            self.connect("destroy", self.on_destroy)
-
-        def on_close_clicked(self, btn):
-            self.destroy()
-
-        def on_destroy(self, widget):
+        def destroy(self):
             self.polling = False
-            if self.parent_welcome:
-                self.parent_welcome.show()
+            super().destroy()
 
-        def on_toggle_language(self, btn):
-            self.lang = "hu" if self.lang == "en" else "en"
-            self.strings = STRINGS[self.lang]
-            self.set_title(self.strings["window_title"])
-            btn.set_label(self.strings["language"])
-            btn.set_tooltip_text(self.strings["tooltip_language"])
+        def update_language(self, lang):
+            self.lang = lang
+            self.strings = STRINGS[lang]
             self.update_ui_language()
 
         def update_ui_language(self):
@@ -1092,7 +1053,7 @@ def run_gui():
         def on_install_clicked(self, btn, st):
             profile = SERVICE_REGISTRY[st]
             if profile.install_cmd:
-                execute_command(profile.install_cmd, f"Installing {profile.key}", parent_gui=self)
+                execute_command(profile.install_cmd, f"Installing {profile.key}", parent_gui=self.parent_window)
 
         def on_toggle_enable(self, btn, st):
             profile = SERVICE_REGISTRY[st]
@@ -1100,9 +1061,9 @@ def run_gui():
                 return
             is_enabled = check_systemd_unit_enabled(profile.unit_name)
             if is_enabled:
-                execute_command(f"sudo systemctl disable --now {profile.unit_name}", f"Disable {profile.key}", parent_gui=self)
+                execute_command(f"sudo systemctl disable --now {profile.unit_name}", f"Disable {profile.key}", parent_gui=self.parent_window)
             else:
-                execute_command(f"sudo systemctl enable --now {profile.unit_name}", f"Enable {profile.key}", parent_gui=self)
+                execute_command(f"sudo systemctl enable --now {profile.unit_name}", f"Enable {profile.key}", parent_gui=self.parent_window)
             self.refresh_service_state(st)
 
         def on_toggle_start_stop(self, btn, st):
@@ -1111,17 +1072,17 @@ def run_gui():
                 return
             if st == ServiceType.KOHYA:
                 if check_systemd_unit_active(profile.unit_name):
-                    execute_command(f"sudo systemctl stop {KOHYA_UNIT}; sudo -u {KOHYA_USER} byobu kill-session -t {KOHYA_SESSION}", "Stop Kohya", parent_gui=self)
+                    execute_command(f"sudo systemctl stop {KOHYA_UNIT}; sudo -u {KOHYA_USER} byobu kill-session -t {KOHYA_SESSION}", "Stop Kohya", parent_gui=self.parent_window)
                 else:
                     env_var = 'export CUDA_VISIBLE_DEVICES="0"'
                     cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
-                    execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya (GPU)", parent_gui=self)
+                    execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya (GPU)", parent_gui=self.parent_window)
             else:
                 is_active = check_systemd_unit_active(profile.unit_name)
                 if is_active:
-                    execute_command(f"sudo systemctl stop {profile.unit_name}", f"Stop {profile.key}", parent_gui=self)
+                    execute_command(f"sudo systemctl stop {profile.unit_name}", f"Stop {profile.key}", parent_gui=self.parent_window)
                 else:
-                    execute_command(f"sudo systemctl start {profile.unit_name}", f"Start {profile.key}", parent_gui=self)
+                    execute_command(f"sudo systemctl start {profile.unit_name}", f"Start {profile.key}", parent_gui=self.parent_window)
             self.refresh_service_state(st)
 
         def on_restart(self, btn, st):
@@ -1130,20 +1091,20 @@ def run_gui():
                 if st == ServiceType.KOHYA:
                     env_var = 'export CUDA_VISIBLE_DEVICES="0"'
                     cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
-                    execute_command(f"sudo systemctl stop {KOHYA_UNIT}; sudo -u {KOHYA_USER} byobu kill-session -t {KOHYA_SESSION}; sleep 2; sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Restart Kohya", parent_gui=self)
+                    execute_command(f"sudo systemctl stop {KOHYA_UNIT}; sudo -u {KOHYA_USER} byobu kill-session -t {KOHYA_SESSION}; sleep 2; sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Restart Kohya", parent_gui=self.parent_window)
                 else:
-                    execute_command(f"sudo systemctl restart {profile.unit_name}", f"Restart {profile.key}", parent_gui=self)
+                    execute_command(f"sudo systemctl restart {profile.unit_name}", f"Restart {profile.key}", parent_gui=self.parent_window)
                 self.refresh_service_state(st)
 
         def on_start_kohya_gpu(self, btn):
             env_var = 'export CUDA_VISIBLE_DEVICES="0"'
             cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
-            execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya GPU", parent_gui=self)
+            execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya GPU", parent_gui=self.parent_window)
             self.refresh_service_state(ServiceType.KOHYA)
 
         def on_start_kohya_cpu(self, btn):
             dialog = Gtk.MessageDialog(
-                transient_for=self,
+                transient_for=self.parent_window,
                 flags=0,
                 message_type=Gtk.MessageType.WARNING,
                 buttons=Gtk.ButtonsType.OK_CANCEL,
@@ -1155,28 +1116,28 @@ def run_gui():
             if response == Gtk.ResponseType.OK:
                 env_var = 'export CUDA_VISIBLE_DEVICES=""'
                 cmd = f"{env_var} && /usr/bin/byobu new-session -d -s {KOHYA_SESSION} '{KOHYA_DIR}/gui.sh --listen 0.0.0.0 --server_port 7861 --headless'"
-                execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya CPU", parent_gui=self)
+                execute_command(f"sudo -u {KOHYA_USER} -H bash -c '{cmd}'", "Start Kohya CPU", parent_gui=self.parent_window)
                 self.refresh_service_state(ServiceType.KOHYA)
 
         def on_inspect_kohya(self, btn):
-            execute_command(f"echo 'Attaching to Kohya session...'; sleep 3; sudo -u {KOHYA_USER} byobu attach -t {KOHYA_SESSION}", "Inspect Kohya", parent_gui=self)
+            execute_command(f"echo 'Attaching to Kohya session...'; sleep 3; sudo -u {KOHYA_USER} byobu attach -t {KOHYA_SESSION}", "Inspect Kohya", parent_gui=self.parent_window)
 
         def on_open_mc(self, btn, st):
             profile = SERVICE_REGISTRY[st]
             if not profile.path:
                 return
             downloads = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) or os.path.expanduser("~/Downloads")
-            execute_command(f"mc {downloads} {profile.path}", f"MC: {profile.key}", parent_gui=self)
+            execute_command(f"mc {downloads} {profile.path}", f"MC: {profile.key}", parent_gui=self.parent_window)
 
         def on_install_extensions(self, btn, st):
             if st == ServiceType.FORGE:
-                execute_command(_forge_extensions_install_command(), "Install Forge Extensions", parent_gui=self)
+                execute_command(_forge_extensions_install_command(), "Install Forge Extensions", parent_gui=self.parent_window)
 
         def on_install_docker(self, btn):
-            execute_command("sudo pacman -S --needed docker docker-compose && sudo systemctl enable --now docker", "Install Docker", parent_gui=self)
+            execute_command("sudo pacman -S --needed docker docker-compose && sudo systemctl enable --now docker", "Install Docker", parent_gui=self.parent_window)
 
         def on_spin_dockge(self, btn):
-            execute_command("sudo docker compose -f /docker/dockge/docker-compose.yml up -d && sleep 30 && xdg-open http://localhost:5001", "Start Dockge", parent_gui=self)
+            execute_command("sudo docker compose -f /docker/dockge/docker-compose.yml up -d && sleep 30 && xdg-open http://localhost:5001", "Start Dockge", parent_gui=self.parent_window)
 
         def refresh_service_state(self, st: ServiceType):
             profile = SERVICE_REGISTRY[st]
@@ -1250,12 +1211,13 @@ def run_gui():
                 time.sleep(5)
 
     class AwesomeWelcome(Gtk.Window):
-        def __init__(self):
+        def __init__(self, services_mode: bool = False):
             super().__init__(title=APP_TITLE)
-            self.set_border_width(20)
-            self.set_default_size(700, 600)
+            self.set_default_size(950, 750)
             self.set_position(Gtk.WindowPosition.CENTER)
-            self.set_resizable(False)
+            self.set_resizable(True)
+            self.lang = "en"
+            self.strings = STRINGS[self.lang]
 
             css_provider = Gtk.CssProvider()
             css_provider.load_from_data(CSS_DATA.encode('utf-8'))
@@ -1265,49 +1227,134 @@ def run_gui():
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             )
 
-            header = Gtk.HeaderBar()
-            header.set_show_close_button(True)
-            header.props.title = APP_TITLE
-            self.set_titlebar(header)
+            self.header = Gtk.HeaderBar()
+            self.header.set_show_close_button(True)
+            self.header.props.title = APP_TITLE
+            self.set_titlebar(self.header)
 
-            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-            self.add(vbox)
+            self.back_btn = Gtk.Button(label=self.strings["back"])
+            self.back_btn.set_tooltip_text("Return to Welcome screen")
+            self.back_btn.connect("clicked", self.on_back_clicked)
+            self.header.pack_start(self.back_btn)
+            self.back_btn.hide()
 
-            lbl_title = Gtk.Label(label=STRINGS["en"]["welcome_title"])
-            lbl_title.get_style_context().add_class("title-label")
-            vbox.pack_start(lbl_title, False, False, 0)
+            self.lang_btn = Gtk.Button(label=self.strings["language"])
+            self.lang_btn.set_tooltip_text(self.strings["tooltip_language"])
+            self.lang_btn.connect("clicked", self.on_toggle_language)
+            self.header.pack_end(self.lang_btn)
 
-            lbl_desc = Gtk.Label(label=STRINGS["en"]["welcome_desc"])
-            lbl_desc.get_style_context().add_class("desc-label")
-            vbox.pack_start(lbl_desc, False, False, 0)
+            refresh_btn = Gtk.Button(label=self.strings["refresh"])
+            refresh_btn.set_tooltip_text(self.strings["tooltip_refresh"])
+            refresh_btn.connect("clicked", lambda x: self.services_manager.refresh_all())
+            self.header.pack_end(refresh_btn)
+
+            self.stack = Gtk.Stack()
+            self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+            self.stack.set_transition_duration(200)
+            self.add(self.stack)
+
+            self.create_welcome_page()
+            self.create_services_page()
 
             self.is_live = os.path.exists("/run/miso/bootmnt/manjaro")
+            if self.is_live:
+                self.lang_btn.hide()
+                refresh_btn.hide()
+                self.stack.set_visible_child_name("welcome")
+                self.back_btn.hide()
+            else:
+                if services_mode:
+                    self.stack.set_visible_child_name("services")
+                    self.back_btn.show()
+                    self.header.props.title = self.strings["window_title"]
+                else:
+                    self.stack.set_visible_child_name("welcome")
+                    self.back_btn.hide()
+                    self.header.props.title = APP_TITLE
+
+            self.connect("destroy", self.on_destroy)
+            self.show_all()
+
+        def on_destroy(self, widget):
+            if hasattr(self, 'services_manager'):
+                self.services_manager.destroy()
+            Gtk.main_quit()
+
+        def on_back_clicked(self, btn):
+            self.stack.set_visible_child_name("welcome")
+            self.back_btn.hide()
+            self.header.props.title = APP_TITLE
+
+        def on_toggle_language(self, btn):
+            self.lang = "hu" if self.lang == "en" else "en"
+            self.strings = STRINGS[self.lang]
+            if self.stack.get_visible_child_name() == "services":
+                self.header.props.title = self.strings["window_title"]
+            else:
+                self.header.props.title = APP_TITLE
+            btn.set_label(self.strings["language"])
+            btn.set_tooltip_text(self.strings["tooltip_language"])
+            self.back_btn.set_label(self.strings["back"])
+            self.update_welcome_language()
+            if hasattr(self, 'services_manager'):
+                self.services_manager.update_language(self.lang)
+
+        def update_welcome_language(self):
+            self.lbl_title.set_text(self.strings["welcome_title"])
+            self.lbl_desc.set_text(self.strings["welcome_desc"])
+            if not self.is_live:
+                self.btn_services.set_label(self.strings["manage_services"])
+                self.btn_services.set_tooltip_text(self.strings["manage_services_tooltip"])
+                self.btn_pamac.set_label(self.strings["manage_software"])
+                self.btn_wall.set_label(self.strings["install_wallpapers"])
+                self.lbl_autostart.set_text(self.strings["launch_at_start"])
+            else:
+                self.btn_install.set_label(self.strings["install_manjaro"])
+                self.lbl_live.set_text(self.strings["live_env"])
+            self.lbl_proj.set_text(self.strings["project_support"])
+            self.lbl_manjaro.set_text(self.strings["manjaro_official"])
+
+        def create_welcome_page(self):
+            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            vbox.set_margin_top(20)
+            vbox.set_margin_bottom(20)
+            vbox.set_margin_start(20)
+            vbox.set_margin_end(20)
+
+            self.lbl_title = Gtk.Label(label=self.strings["welcome_title"])
+            self.lbl_title.get_style_context().add_class("title-label")
+            vbox.pack_start(self.lbl_title, False, False, 0)
+
+            self.lbl_desc = Gtk.Label(label=self.strings["welcome_desc"])
+            self.lbl_desc.get_style_context().add_class("desc-label")
+            vbox.pack_start(self.lbl_desc, False, False, 0)
+
             main_actions_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
             vbox.pack_start(main_actions_box, False, False, 10)
 
             if self.is_live:
-                btn_install = Gtk.Button(label=STRINGS["en"]["install_manjaro"])
-                btn_install.get_style_context().add_class("action-btn")
-                btn_install.connect("clicked", self.on_install_manjaro)
+                self.btn_install = Gtk.Button(label=self.strings["install_manjaro"])
+                self.btn_install.get_style_context().add_class("action-btn")
+                self.btn_install.connect("clicked", self.on_install_manjaro)
                 try:
                     icon = Gtk.Image.new_from_icon_name("system-os-installer", Gtk.IconSize.BUTTON)
-                    btn_install.set_image(icon)
-                    btn_install.set_always_show_image(True)
+                    self.btn_install.set_image(icon)
+                    self.btn_install.set_always_show_image(True)
                 except:
                     pass
-                main_actions_box.pack_start(btn_install, False, False, 0)
-                lbl_live = Gtk.Label(label=STRINGS["en"]["live_env"])
-                main_actions_box.pack_start(lbl_live, False, False, 0)
+                main_actions_box.pack_start(self.btn_install, False, False, 0)
+                self.lbl_live = Gtk.Label(label=self.strings["live_env"])
+                main_actions_box.pack_start(self.lbl_live, False, False, 0)
             else:
                 grid = Gtk.Grid()
                 grid.set_column_spacing(10)
                 grid.set_row_spacing(10)
                 grid.set_halign(Gtk.Align.CENTER)
 
-                self.btn_services = Gtk.Button(label=STRINGS["en"]["manage_services"])
+                self.btn_services = Gtk.Button(label=self.strings["manage_services"])
                 self.btn_services.get_style_context().add_class("action-btn")
                 self.btn_services.set_size_request(250, 50)
-                self.btn_services.set_tooltip_text(STRINGS["en"]["manage_services_tooltip"])
+                self.btn_services.set_tooltip_text(self.strings["manage_services_tooltip"])
                 self.btn_services.connect("clicked", self.on_manage_services)
                 try:
                     icon = Gtk.Image.new_from_icon_name("system-run", Gtk.IconSize.BUTTON)
@@ -1317,46 +1364,46 @@ def run_gui():
                     pass
                 grid.attach(self.btn_services, 0, 0, 1, 1)
 
-                btn_pamac = Gtk.Button(label=STRINGS["en"]["manage_software"])
-                btn_pamac.get_style_context().add_class("action-btn")
-                btn_pamac.set_size_request(250, 50)
-                btn_pamac.set_tooltip_text("Open Pamac Software Manager")
+                self.btn_pamac = Gtk.Button(label=self.strings["manage_software"])
+                self.btn_pamac.get_style_context().add_class("action-btn")
+                self.btn_pamac.set_size_request(250, 50)
+                self.btn_pamac.set_tooltip_text("Open Pamac Software Manager")
                 try:
                     icon_pamac = Gtk.Image.new_from_icon_name("system-software-install", Gtk.IconSize.BUTTON)
-                    btn_pamac.set_image(icon_pamac)
-                    btn_pamac.set_always_show_image(True)
+                    self.btn_pamac.set_image(icon_pamac)
+                    self.btn_pamac.set_always_show_image(True)
                 except:
                     pass
-                btn_pamac.connect("clicked", self.on_open_pamac)
-                grid.attach(btn_pamac, 1, 0, 1, 1)
+                self.btn_pamac.connect("clicked", self.on_open_pamac)
+                grid.attach(self.btn_pamac, 1, 0, 1, 1)
 
-                btn_wall = Gtk.Button(label=STRINGS["en"]["install_wallpapers"])
-                btn_wall.get_style_context().add_class("action-btn")
-                btn_wall.set_size_request(510, 50)
-                btn_wall.set_tooltip_text("Installs 'nordic-backgrounds' package")
+                self.btn_wall = Gtk.Button(label=self.strings["install_wallpapers"])
+                self.btn_wall.get_style_context().add_class("action-btn")
+                self.btn_wall.set_size_request(510, 50)
+                self.btn_wall.set_tooltip_text("Installs 'nordic-backgrounds' package")
                 try:
                     icon_wall = Gtk.Image.new_from_icon_name("preferences-desktop-wallpaper", Gtk.IconSize.BUTTON)
-                    btn_wall.set_image(icon_wall)
-                    btn_wall.set_always_show_image(True)
+                    self.btn_wall.set_image(icon_wall)
+                    self.btn_wall.set_always_show_image(True)
                 except:
                     pass
-                btn_wall.connect("clicked", self.on_install_wallpapers)
-                grid.attach(btn_wall, 0, 1, 2, 1)
+                self.btn_wall.connect("clicked", self.on_install_wallpapers)
+                grid.attach(self.btn_wall, 0, 1, 2, 1)
 
                 main_actions_box.pack_start(grid, False, False, 0)
 
-            lbl_proj = Gtk.Label(label=STRINGS["en"]["project_support"])
-            lbl_proj.get_style_context().add_class("section-label")
-            vbox.pack_start(lbl_proj, False, False, 5)
+            self.lbl_proj = Gtk.Label(label=self.strings["project_support"])
+            self.lbl_proj.get_style_context().add_class("section-label")
+            vbox.pack_start(self.lbl_proj, False, False, 5)
             box_proj = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
             box_proj.set_halign(Gtk.Align.CENTER)
             for name, url in LINKS_PROJECT.items():
                 self.add_link_button(box_proj, name, url)
             vbox.pack_start(box_proj, False, False, 0)
 
-            lbl_manjaro = Gtk.Label(label=STRINGS["en"]["manjaro_official"])
-            lbl_manjaro.get_style_context().add_class("section-label")
-            vbox.pack_start(lbl_manjaro, False, False, 5)
+            self.lbl_manjaro = Gtk.Label(label=self.strings["manjaro_official"])
+            self.lbl_manjaro.get_style_context().add_class("section-label")
+            vbox.pack_start(self.lbl_manjaro, False, False, 5)
             box_manjaro = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
             box_manjaro.set_halign(Gtk.Align.CENTER)
             for name, url in LINKS_MANJARO.items():
@@ -1367,13 +1414,19 @@ def run_gui():
                 autostart_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
                 autostart_box.set_halign(Gtk.Align.CENTER)
                 autostart_box.get_style_context().add_class("autostart-box")
-                lbl_autostart = Gtk.Label(label=STRINGS["en"]["launch_at_start"])
+                self.lbl_autostart = Gtk.Label(label=self.strings["launch_at_start"])
                 self.switch_autostart = Gtk.Switch()
                 self.switch_autostart.set_active(os.path.lexists(AUTOSTART_FILE))
                 self.switch_autostart.connect("notify::active", self.on_autostart_toggled)
-                autostart_box.pack_start(lbl_autostart, False, False, 0)
+                autostart_box.pack_start(self.lbl_autostart, False, False, 0)
                 autostart_box.pack_start(self.switch_autostart, False, False, 0)
                 vbox.pack_end(autostart_box, False, False, 10)
+
+            self.stack.add_named(vbox, "welcome")
+
+        def create_services_page(self):
+            self.services_manager = ServicesManagerWidget(parent_window=self)
+            self.stack.add_named(self.services_manager, "services")
 
         def add_link_button(self, box, label, url):
             btn = Gtk.Button(label=label)
@@ -1420,9 +1473,9 @@ def run_gui():
                 self.show_error(f"Failed to launch installer: {e}")
 
         def on_manage_services(self, widget):
-            self.hide()
-            manager = AIServicesManagerGTK(parent_welcome=self)
-            manager.show_all()
+            self.stack.set_visible_child_name("services")
+            self.back_btn.show()
+            self.header.props.title = self.strings["window_title"]
 
         def show_error(self, message):
             dialog = Gtk.MessageDialog(
@@ -1430,15 +1483,13 @@ def run_gui():
                 flags=0,
                 message_type=Gtk.MessageType.ERROR,
                 buttons=Gtk.ButtonsType.OK,
-                text=STRINGS["en"]["error"]
+                text=self.strings["error"]
             )
             dialog.format_secondary_text(str(message))
             dialog.run()
             dialog.destroy()
 
-    win = AwesomeWelcome()
-    win.connect("destroy", Gtk.main_quit)
-    win.show_all()
+    win = AwesomeWelcome(services_mode=services_mode)
     Gtk.main()
 
 # ============================================================================
@@ -1448,13 +1499,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Manjaro Awesome Respin Welcome")
     parser.add_argument("--test", action="store_true", help="Dry run mode: show commands without executing")
     parser.add_argument("--tui", action="store_true", help="Force TUI mode even if DISPLAY is available")
+    parser.add_argument("--services", action="store_true", help="Launch directly into the Manage Services view")
     args = parser.parse_args()
 
     DRY_RUN = args.test
 
     if args.tui:
-        run_tui()
+        run_tui(services_mode=args.services)
     elif has_gui() and not is_ssh_session():
-        run_gui()
+        run_gui(services_mode=args.services)
     else:
-        run_tui()
+        run_tui(services_mode=args.services)
