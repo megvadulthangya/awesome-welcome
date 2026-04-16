@@ -522,16 +522,17 @@ def run_tui(services_mode=False):
             self.lang = lang_mgr
 
         def compose(self) -> ComposeResult:
-            with Container(classes="service-panel"):
+            with ScrollableContainer(classes="service-panel"):
                 yield Horizontal(
                     Label(self.lang.t(self.profile.display_name_key), classes="service-title"),
                     Label("", id=f"status-{self.service_type.value}", classes="service-status"),
+                    classes="title-row",
                 )
                 info_key = f"models_info_{self.service_type.value}"
                 info_text = self.lang.t(info_key)
                 if info_text != info_key:
-                    yield Label(info_text, id=f"info-{self.service_type.value}", classes="service-info")
-                with Horizontal(classes="button-row"):
+                    yield Static(info_text, id=f"info-{self.service_type.value}", classes="service-info")
+                with Container(classes="button-row"):
                     if self.profile.install_cmd:
                         yield Button(self.lang.t("install"), id=f"install-{self.service_type.value}",
                                      tooltip=self.lang.t("tooltip_install"))
@@ -569,7 +570,7 @@ def run_tui(services_mode=False):
             info_text = self.lang.t(info_key)
             if info_text != info_key:
                 try:
-                    self.query_one(f"#info-{self.service_type.value}", Label).update(info_text)
+                    self.query_one(f"#info-{self.service_type.value}", Static).update(info_text)
                 except Exception:
                     pass
             if self.profile.unit_name:
@@ -751,23 +752,49 @@ def run_tui(services_mode=False):
             background: {NORD_COLORS['dark1']};
             color: {NORD_COLORS['light2']};
         }}
+        TabbedContent, TabPane {{
+            height: 1fr;
+        }}
         .service-panel {{
             border: solid {NORD_COLORS['dark3']};
             background: {NORD_COLORS['dark1']};
             margin: 1;
             padding: 1;
+            height: 1fr;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }}
+        .title-row {{
+            height: auto;
+            width: 1fr;
         }}
         .service-title {{
             color: {NORD_COLORS['frost1']};
             text-style: bold;
+            width: 1fr;
         }}
         .service-status {{
             color: {NORD_COLORS['green']};
+            width: auto;
         }}
         .service-info {{
             color: $text-muted;
             margin: 1 2;
             text-style: italic;
+            height: auto;
+            width: 1fr;
+        }}
+        .button-row {{
+            layout: grid;
+            grid-size: 3;
+            grid-gutter: 0 1;
+            height: auto;
+            width: 1fr;
+            margin-top: 1;
+        }}
+        .button-row Button {{
+            width: 1fr;
+            margin: 0;
         }}
         Button {{
             background: {NORD_COLORS['dark3']};
