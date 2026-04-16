@@ -118,6 +118,9 @@ STRINGS = {
         "error": "Error",
         "dry_run_title": "Dry Run",
         "dry_run_text": "Would execute:\n\n{command}",
+        "models_info_forge": "📁 Central model storage: Place all models, LoRAs, VAEs, embeddings, hypernetworks, and ControlNet models here. ComfyUI and Kohya_ss will read from this directory — no need to duplicate files.",
+        "models_info_comfy": "🔗 ComfyUI uses models from SD WebUI Forge directory. No need to copy models here — just place everything in the Forge folder.",
+        "models_info_kohya": "🔗 Kohya_ss uses models from SD WebUI Forge directory. No need to copy models here — just place everything in the Forge folder.",
     },
     "hu": {
         "window_title": "AI Szolgáltatáskezelő",
@@ -179,6 +182,9 @@ STRINGS = {
         "error": "Hiba",
         "dry_run_title": "Próbaüzem",
         "dry_run_text": "Végrehajtaná:\n\n{command}",
+        "models_info_forge": "📁 Központi modell tároló: Minden modellt, LoRA-t, VAE-t, embedding-et, hypernetwork-öt és ControlNet modellt ide helyezz el. A ComfyUI és a Kohya_ss ebből a mappából olvas — nem kell duplikálni a fájlokat.",
+        "models_info_comfy": "🔗 A ComfyUI az SD WebUI Forge mappájából használja a modelleket. Nem kell ide másolni semmit — csak a Forge mappába rakj mindent.",
+        "models_info_kohya": "🔗 A Kohya_ss az SD WebUI Forge mappájából használja a modelleket. Nem kell ide másolni semmit — csak a Forge mappába rakj mindent.",
     }
 }
 
@@ -521,6 +527,10 @@ def run_tui(services_mode=False):
                     Label(self.lang.t(self.profile.display_name_key), classes="service-title"),
                     Label("", id=f"status-{self.service_type.value}", classes="service-status"),
                 )
+                info_key = f"models_info_{self.service_type.value}"
+                info_text = self.lang.t(info_key)
+                if info_text != info_key:
+                    yield Label(info_text, classes="service-info")
                 with Horizontal(classes="button-row"):
                     if self.profile.install_cmd:
                         yield Button(self.lang.t("install"), id=f"install-{self.service_type.value}",
@@ -747,6 +757,11 @@ def run_tui(services_mode=False):
         .service-status {{
             color: {NORD_COLORS['green']};
         }}
+        .service-info {{
+            color: $text-muted;
+            margin: 1 2;
+            text-style: italic;
+        }}
         Button {{
             background: {NORD_COLORS['dark3']};
             color: {NORD_COLORS['light2']};
@@ -943,6 +958,11 @@ def run_gui(services_mode=False):
             docker_page = self.notebook.get_nth_page(4)
             label = self.notebook.get_tab_label(docker_page)
             label.set_text(self.strings["service_docker"])
+            for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY]:
+                info_key = f"models_info_{st.value}"
+                if hasattr(self, f"info_label_{st.value}"):
+                    info_label = getattr(self, f"info_label_{st.value}")
+                    GLib.idle_add(info_label.set_markup, f"<i>{self.strings[info_key]}</i>")
             self.refresh_all()
 
         def create_service_tabs(self):
@@ -973,6 +993,34 @@ def run_gui(services_mode=False):
             status_label.get_style_context().add_class("service-status")
             hbox_title.pack_end(status_label, False, False, 0)
             box.pack_start(hbox_title, False, False, 0)
+
+            if st == ServiceType.FORGE:
+                info_label = Gtk.Label()
+                info_label.set_markup(f"<i>{self.strings['models_info_forge']}</i>")
+                info_label.set_line_wrap(True)
+                info_label.set_xalign(0)
+                info_label.set_margin_top(5)
+                info_label.set_margin_bottom(5)
+                box.pack_start(info_label, False, False, 0)
+                setattr(self, f"info_label_{st.value}", info_label)
+            elif st == ServiceType.COMFY:
+                info_label = Gtk.Label()
+                info_label.set_markup(f"<i>{self.strings['models_info_comfy']}</i>")
+                info_label.set_line_wrap(True)
+                info_label.set_xalign(0)
+                info_label.set_margin_top(5)
+                info_label.set_margin_bottom(5)
+                box.pack_start(info_label, False, False, 0)
+                setattr(self, f"info_label_{st.value}", info_label)
+            elif st == ServiceType.KOHYA:
+                info_label = Gtk.Label()
+                info_label.set_markup(f"<i>{self.strings['models_info_kohya']}</i>")
+                info_label.set_line_wrap(True)
+                info_label.set_xalign(0)
+                info_label.set_margin_top(5)
+                info_label.set_margin_bottom(5)
+                box.pack_start(info_label, False, False, 0)
+                setattr(self, f"info_label_{st.value}", info_label)
 
             btn_box = Gtk.FlowBox()
             btn_box.set_selection_mode(Gtk.SelectionMode.NONE)
