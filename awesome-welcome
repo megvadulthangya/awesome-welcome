@@ -530,7 +530,7 @@ def run_tui(services_mode=False):
                 info_key = f"models_info_{self.service_type.value}"
                 info_text = self.lang.t(info_key)
                 if info_text != info_key:
-                    yield Label(info_text, classes="service-info")
+                    yield Label(info_text, id=f"info-{self.service_type.value}", classes="service-info")
                 with Horizontal(classes="button-row"):
                     if self.profile.install_cmd:
                         yield Button(self.lang.t("install"), id=f"install-{self.service_type.value}",
@@ -565,6 +565,13 @@ def run_tui(services_mode=False):
         def update_status(self):
             status = self.get_status_text()
             self.query_one(f"#status-{self.service_type.value}", Label).update(status)
+            info_key = f"models_info_{self.service_type.value}"
+            info_text = self.lang.t(info_key)
+            if info_text != info_key:
+                try:
+                    self.query_one(f"#info-{self.service_type.value}", Label).update(info_text)
+                except Exception:
+                    pass
             if self.profile.unit_name:
                 enabled = check_systemd_unit_enabled(self.profile.unit_name)
                 active = check_systemd_unit_active(self.profile.unit_name)
