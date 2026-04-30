@@ -384,13 +384,20 @@ def execute_command(cmd_string: str, title: str = "Command", parent_gui=None, tu
 
     # Real execution
     if has_gui() and not is_ssh_session():
-        # GUI mode: use tilix
+        # GUI mode: use tilix (separate terminal window, async is fine)
         cmd = f'tilix -t "{title}" -e "bash -c \'{cmd_string}; echo; echo Press Enter to close; read\'"'
+        subprocess.Popen(cmd, shell=True)
     else:
-        # TTY/SSH mode: run directly
-        cmd = f'bash -c "{cmd_string}; echo; echo Press Enter to close; read"'
-
-    subprocess.Popen(cmd, shell=True)
+        # TTY/SSH mode: suspend TUI if active, run command synchronously, then resume.
+        # Running synchronously (and suspending the Textual app) prevents the TUI
+        # and the subprocess (e.g. sudo password prompts) from fighting over the
+        # same terminal, which otherwise produces unreadable overlapping output.
+        shell_cmd = f'bash -c "{cmd_string}; echo; echo Press Enter to close; read"'
+        if tui_app is not None:
+            with tui_app.suspend():
+                subprocess.run(shell_cmd, shell=True)
+        else:
+            subprocess.run(shell_cmd, shell=True)
 
 # ============================================================================
 # KOHYA-SPECIFIC LIFECYCLE (EXACT BASH EQUIVALENT)
