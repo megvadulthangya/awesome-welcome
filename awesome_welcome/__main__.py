@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 """Entry point for awesome-welcome."""
+import sys
+import os
+
+# Ensure the repo root (parent of awesome_welcome/) is on sys.path
+# so that 'python awesome_welcome' works after a plain git clone.
+_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
 import argparse
 
 from awesome_welcome import config
