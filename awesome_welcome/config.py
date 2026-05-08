@@ -4,7 +4,7 @@ import os
 # ============================================================================
 # CONFIGURATION & CONSTANTS
 # ============================================================================
-APP_TITLE = "Manjaro Awesome Respin Welcome"
+APP_TITLE = "Manjaro Awesome Respin AI Welcome"
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
