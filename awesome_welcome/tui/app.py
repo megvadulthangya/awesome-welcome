@@ -110,6 +110,25 @@ class AIServicesManagerTUI(App):
         margin-top: 1;
         align: center middle;
     }}
+    .ext-dialog {{
+        background: {NORD_COLORS['dark1']};
+        border: thick {NORD_COLORS['frost1']};
+        padding: 2;
+        margin: 5 10;
+    }}
+    .ext-title {{
+        color: {NORD_COLORS['frost1']};
+        text-style: bold;
+        padding: 1;
+    }}
+    .ext-list {{
+        height: 15;
+        margin: 1;
+    }}
+    .ext-buttons {{
+        margin-top: 1;
+        align: center middle;
+    }}
     """
 
     def __init__(self):

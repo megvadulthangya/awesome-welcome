@@ -1,17 +1,99 @@
-"""SD WebUI Forge service helpers."""
+"""Forge-related service logic: extensions registry and install commands."""
+
+import os
+
+FORGE_EXTENSIONS_DIR = "/opt/stable-diffusion-webui-forge/extensions"
+
+FORGE_EXTENSIONS = [
+    {"name": "adetailer", "branch": "main", "url": "https://github.com/Bing-su/adetailer.git"},
+    {"name": "DWPose", "branch": "onnx", "url": "https://github.com/IDEA-Research/DWPose.git"},
+    {"name": "MyStyleSelectorXL", "branch": "main", "url": "https://github.com/megvadulthangya/MyStyleSelectorXL.git"},
+    {"name": "sd-dynamic-prompts", "branch": "main", "url": "https://github.com/adieyal/sd-dynamic-prompts/"},
+    {"name": "sd-webui-3d-open-pose-editor", "branch": "main", "url": "https://github.com/nonnonstop/sd-webui-3d-open-pose-editor.git"},
+    {"name": "sd-webui-ar-plusplus", "branch": "main", "url": "https://github.com/altoiddealer/--sd-webui-ar-plusplus.git"},
+    {"name": "sd-webui-hardware-info-in-metadata", "branch": "master", "url": "https://github.com/light-and-ray/sd-webui-hardware-info-in-metadata.git"},
+    {"name": "sd-webui-infinite-image-browsing", "branch": "main", "url": "https://github.com/zanllp/sd-webui-infinite-image-browsing.git"},
+    {"name": "stable-diffusion-webui-Prompt_Generator", "branch": "master", "url": "https://github.com/imrayya/stable-diffusion-webui-Prompt_Generator.git"},
+    {"name": "Stylez", "branch": "main", "url": "https://github.com/megvadulthangya/Stylez.git"},
+    {"name": "ultimate-upscale-for-automatic1111", "branch": "master", "url": "https://github.com/Coyote-A/ultimate-upscale-for-automatic1111.git"},
+    {"name": "wildcard-gallery", "branch": "main", "url": "https://github.com/navimixu/wildcard-gallery.git"},
+]
+
+# --- Forge Manager constants and helpers ---
+FORGE_INSTALL_DIR = "/opt/stable-diffusion-webui-forge"
+FORGE_VENV_DIR = f"{FORGE_INSTALL_DIR}/venv"
+FORGE_REQ_FILE_OLD = "requirements_versions.txt"
+FORGE_REQ_FILE_NEO = "requirements.txt"
 
 
-def _forge_extensions_install_command():
-    """Return shell command to install recommended SD Forge extensions directly."""
-    extensions_dir = "/opt/stable-diffusion-webui-forge/extensions"
-    cmds = [
-        f"mkdir -p {extensions_dir}",
-        f"cd {extensions_dir}",
-        "git clone https://github.com/Mikubill/sd-webui-controlnet.git",
-        "git clone https://github.com/continue-revolution/sd-webui-segment-anything.git",
-        "git clone https://github.com/Bing-su/adetailer.git",
-        "git clone https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111.git",
-        "git clone https://github.com/huchenlei/sd-webui-openpose-editor.git",
-        "git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui-rembg.git",
-    ]
+def _forge_extensions_install_command(selected_extensions=None):
+    """Return shell command to install selected (or all) SD Forge extensions."""
+    if selected_extensions is None:
+        selected_extensions = FORGE_EXTENSIONS
+    cmds = [f"mkdir -p {FORGE_EXTENSIONS_DIR}", f"cd {FORGE_EXTENSIONS_DIR}"]
+    for ext in selected_extensions:
+        cmds.append(f"git clone -b {ext['branch']} {ext['url']}")
     return " && ".join(cmds)
+
+
+def detect_forge_flavor():
+    """Detect installed forge flavor based on requirements file."""
+    if os.path.isfile(os.path.join(FORGE_INSTALL_DIR, FORGE_REQ_FILE_NEO)):
+        return "neo"
+    elif os.path.isfile(os.path.join(FORGE_INSTALL_DIR, FORGE_REQ_FILE_OLD)):
+        return "forge"
+    return ""
+
+
+def forge_python_binary(flavor):
+    return "python3.13" if flavor == "neo" else "python3.10"
+
+
+def forge_requirements_file(flavor):
+    if flavor == "neo":
+        return f"{FORGE_INSTALL_DIR}/{FORGE_REQ_FILE_NEO}"
+    return f"{FORGE_INSTALL_DIR}/{FORGE_REQ_FILE_OLD}"
+
+
+def forge_rebuild_venv_command(flavor):
+    python_bin = forge_python_binary(flavor)
+    req_file = forge_requirements_file(flavor)
+    return (
+        f"sudo -u diffusion rm -rf {FORGE_VENV_DIR} && "
+        f"sudo -u diffusion {python_bin} -m venv {FORGE_VENV_DIR} && "
+        f"sudo -u diffusion {FORGE_VENV_DIR}/bin/python -m pip install --upgrade pip && "
+        f"sudo -u diffusion {FORGE_VENV_DIR}/bin/python -m pip install -r {req_file}"
+    )
+
+
+def forge_pip_refresh_command(flavor):
+    req_file = forge_requirements_file(flavor)
+    return (
+        f"sudo -u diffusion {FORGE_VENV_DIR}/bin/python -m pip install --upgrade pip && "
+        f"sudo -u diffusion {FORGE_VENV_DIR}/bin/python -m pip install -r {req_file}"
+    )
+
+
+def forge_purge_command(pkg):
+    return f"sudo pacman -R --noconfirm {pkg}; sudo rm -rf {FORGE_INSTALL_DIR}"
+
+
+def forge_install_package_command(pkg):
+    return f"sudo pacman -S --noconfirm {pkg}"
+
+
+def detect_forge_package():
+    """Detect which pacman package is installed."""
+    import subprocess
+    for pkg_name in [
+        "stable-diffusion-webui-forge",
+        "stable-diffusion-webui-forge-cu124",
+        "stable-diffusion-webui-forge-neo-git",
+    ]:
+        try:
+            result = subprocess.run(["pacman", "-Q", pkg_name], capture_output=True, text=True)
+            if result.returncode == 0:
+                return pkg_name
+        except Exception:
+            pass
+    return ""

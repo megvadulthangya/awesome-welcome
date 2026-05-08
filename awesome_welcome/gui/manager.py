@@ -169,9 +169,10 @@ class AIServicesManagerGTK(Gtk.Window):
         btn_box.set_row_spacing(5)
 
         if profile.install_cmd:
+            tooltip_key = "tooltip_install_ollama" if st == ServiceType.OLLAMA else "tooltip_install_venv"
             btn_install = Gtk.Button(label=self.strings["install"])
             btn_install.get_style_context().add_class("service-button")
-            btn_install.set_tooltip_text(self.strings["tooltip_install"])
+            btn_install.set_tooltip_text(self.strings[tooltip_key])
             btn_install.connect("clicked", self.on_install_clicked, st)
             btn_box.add(btn_install)
             setattr(self, f"btn_install_{st.value}", btn_install)
@@ -228,6 +229,13 @@ class AIServicesManagerGTK(Gtk.Window):
             btn_box.add(btn_mc)
             setattr(self, f"btn_mc_{st.value}", btn_mc)
 
+            btn_thunar = Gtk.Button(label=self.strings["open_thunar"])
+            btn_thunar.get_style_context().add_class("service-button")
+            btn_thunar.set_tooltip_text(self.strings["tooltip_thunar"])
+            btn_thunar.connect("clicked", self.on_open_thunar, st)
+            btn_box.add(btn_thunar)
+            setattr(self, f"btn_thunar_{st.value}", btn_thunar)
+
         if "extensions" in profile.special_controls:
             btn_exts = Gtk.Button(label=self.strings["install_extensions"])
             btn_exts.get_style_context().add_class("service-button")
@@ -235,6 +243,35 @@ class AIServicesManagerGTK(Gtk.Window):
             btn_exts.connect("clicked", self.on_install_extensions, st)
             btn_box.add(btn_exts)
             setattr(self, f"btn_exts_{st.value}", btn_exts)
+
+        if st == ServiceType.FORGE:
+            btn_pip_refresh = Gtk.Button(label=self.strings["forge_pip_refresh"])
+            btn_pip_refresh.get_style_context().add_class("service-button")
+            btn_pip_refresh.set_tooltip_text(self.strings["tooltip_forge_pip_refresh"])
+            btn_pip_refresh.connect("clicked", self.on_forge_pip_refresh)
+            btn_box.add(btn_pip_refresh)
+            self.btn_forge_pip_refresh = btn_pip_refresh
+
+            btn_venv_rebuild = Gtk.Button(label=self.strings["forge_venv_rebuild"])
+            btn_venv_rebuild.get_style_context().add_class("service-button")
+            btn_venv_rebuild.set_tooltip_text(self.strings["tooltip_forge_venv_rebuild"])
+            btn_venv_rebuild.connect("clicked", self.on_forge_venv_rebuild)
+            btn_box.add(btn_venv_rebuild)
+            self.btn_forge_venv_rebuild = btn_venv_rebuild
+
+            btn_switch = Gtk.Button(label=self.strings["forge_switch_version"])
+            btn_switch.get_style_context().add_class("service-button")
+            btn_switch.set_tooltip_text(self.strings["tooltip_forge_switch_version"])
+            btn_switch.connect("clicked", self.on_forge_switch_version)
+            btn_box.add(btn_switch)
+            self.btn_forge_switch = btn_switch
+
+            btn_purge = Gtk.Button(label=self.strings["forge_purge"])
+            btn_purge.get_style_context().add_class("service-button")
+            btn_purge.set_tooltip_text(self.strings["tooltip_forge_purge"])
+            btn_purge.connect("clicked", self.on_forge_purge)
+            btn_box.add(btn_purge)
+            self.btn_forge_purge = btn_purge
 
         if st == ServiceType.OLLAMA:
             btn_dockge = Gtk.Button(label=self.strings["open_dockge"])
@@ -356,9 +393,177 @@ class AIServicesManagerGTK(Gtk.Window):
         downloads = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) or os.path.expanduser("~/Downloads")
         execute_command(f"mc {downloads} {profile.path}", f"MC: {profile.key}", parent_gui=self)
 
+    def on_open_thunar(self, btn, st):
+        profile = SERVICE_REGISTRY[st]
+        if not profile.path:
+            return
+        execute_command(f"thunar {profile.path}", f"Thunar: {profile.key}", parent_gui=self)
+
     def on_install_extensions(self, btn, st):
-        if st == ServiceType.FORGE:
-            execute_command(_forge_extensions_install_command(), "Install Forge Extensions", parent_gui=self)
+        if st != ServiceType.FORGE:
+            return
+        from awesome_welcome.services.forge import FORGE_EXTENSIONS, _forge_extensions_install_command
+
+        dialog = Gtk.Dialog(
+            title=self.strings["ext_dialog_title"],
+            transient_for=self,
+            flags=0,
+        )
+        dialog.set_default_size(500, 400)
+
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(10)
+        content.set_margin_start(10)
+        content.set_margin_end(10)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_height(300)
+
+        listbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        checks = []
+        for ext in FORGE_EXTENSIONS:
+            cb = Gtk.CheckButton(label=ext["name"])
+            cb.set_active(True)
+            checks.append((cb, ext))
+            listbox.pack_start(cb, False, False, 0)
+
+        scrolled.add(listbox)
+        content.pack_start(scrolled, True, True, 0)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        btn_box.set_halign(Gtk.Align.CENTER)
+
+        btn_all = Gtk.Button(label=self.strings["ext_select_all"])
+        btn_all.connect("clicked", lambda w: [cb.set_active(True) for cb, _ in checks])
+        btn_box.pack_start(btn_all, False, False, 0)
+
+        btn_none = Gtk.Button(label=self.strings["ext_deselect_all"])
+        btn_none.connect("clicked", lambda w: [cb.set_active(False) for cb, _ in checks])
+        btn_box.pack_start(btn_none, False, False, 0)
+
+        content.pack_start(btn_box, False, False, 0)
+
+        dialog.add_button(self.strings["ext_cancel"], Gtk.ResponseType.CANCEL)
+        dialog.add_button(self.strings["ext_install_selected"], Gtk.ResponseType.OK)
+
+        dialog.show_all()
+        response = dialog.run()
+
+        if response == Gtk.ResponseType.OK:
+            selected = [ext for cb, ext in checks if cb.get_active()]
+            if selected:
+                execute_command(_forge_extensions_install_command(selected), "Install Forge Extensions", parent_gui=self)
+
+        dialog.destroy()
+
+    def on_forge_pip_refresh(self, btn):
+        from awesome_welcome.services.forge import detect_forge_flavor, forge_pip_refresh_command
+        flavor = detect_forge_flavor()
+        if not flavor:
+            self._show_error("Cannot detect installed Forge flavor.")
+            return
+        execute_command(forge_pip_refresh_command(flavor), "Forge: Pip Refresh", parent_gui=self)
+
+    def on_forge_venv_rebuild(self, btn):
+        from awesome_welcome.services.forge import detect_forge_flavor, forge_rebuild_venv_command
+        flavor = detect_forge_flavor()
+        if not flavor:
+            self._show_error("Cannot detect installed Forge flavor.")
+            return
+        dialog = Gtk.MessageDialog(
+            transient_for=self, flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.OK_CANCEL,
+            text=self.strings["forge_confirm_rebuild"]
+        )
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK:
+            execute_command(forge_rebuild_venv_command(flavor), "Forge: Rebuild venv", parent_gui=self)
+
+    def on_forge_switch_version(self, btn):
+        from awesome_welcome.services.forge import detect_forge_package, forge_purge_command, forge_install_package_command
+        dialog = Gtk.Dialog(
+            title=self.strings["forge_switch_version"],
+            transient_for=self, flags=0,
+        )
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(10)
+        content.set_margin_start(10)
+        content.set_margin_end(10)
+
+        warn = Gtk.Label(label=self.strings["forge_purge_warning"])
+        warn.set_line_wrap(True)
+        content.pack_start(warn, False, False, 0)
+
+        versions = [
+            ("stable-diffusion-webui-forge", self.strings["forge_version_forge"]),
+            ("stable-diffusion-webui-forge-cu124", self.strings["forge_version_cu124"]),
+            ("stable-diffusion-webui-forge-neo-git", self.strings["forge_version_neo"]),
+        ]
+        radios = []
+        first = None
+        for pkg, label_text in versions:
+            if first is None:
+                rb = Gtk.RadioButton.new_with_label(None, label_text)
+                first = rb
+            else:
+                rb = Gtk.RadioButton.new_with_label_from_widget(first, label_text)
+            rb.pkg_name = pkg
+            radios.append(rb)
+            content.pack_start(rb, False, False, 0)
+
+        dialog.add_button(self.strings.get("ext_cancel", "Cancel"), Gtk.ResponseType.CANCEL)
+        dialog.add_button("OK", Gtk.ResponseType.OK)
+        dialog.show_all()
+        response = dialog.run()
+
+        if response == Gtk.ResponseType.OK:
+            selected_pkg = None
+            for rb in radios:
+                if rb.get_active():
+                    selected_pkg = rb.pkg_name
+                    break
+            if selected_pkg:
+                current_pkg = detect_forge_package()
+                cmd_parts = []
+                if current_pkg:
+                    cmd_parts.append(forge_purge_command(current_pkg))
+                cmd_parts.append(forge_install_package_command(selected_pkg))
+                execute_command(" && ".join(cmd_parts), "Forge: Switch Version", parent_gui=self)
+        dialog.destroy()
+
+    def on_forge_purge(self, btn):
+        from awesome_welcome.services.forge import detect_forge_package, forge_purge_command, FORGE_INSTALL_DIR
+        dialog = Gtk.MessageDialog(
+            transient_for=self, flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.OK_CANCEL,
+            text=self.strings["forge_purge_warning"]
+        )
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK:
+            pkg = detect_forge_package()
+            if pkg:
+                execute_command(forge_purge_command(pkg), "Forge: Purge", parent_gui=self)
+            else:
+                execute_command(f"sudo rm -rf {FORGE_INSTALL_DIR}", "Forge: Remove files", parent_gui=self)
+        self.refresh_service_state(ServiceType.FORGE)
+
+    def _show_error(self, message):
+        dialog = Gtk.MessageDialog(
+            transient_for=self, flags=0,
+            message_type=Gtk.MessageType.ERROR,
+            buttons=Gtk.ButtonsType.OK,
+            text=self.strings.get("error", "Error")
+        )
+        dialog.format_secondary_text(str(message))
+        dialog.run()
+        dialog.destroy()
 
     def on_install_docker(self, btn):
         execute_command("sudo pacman -S --needed docker docker-compose && sudo systemctl enable --now docker", "Install Docker", parent_gui=self)
@@ -409,10 +614,14 @@ class AIServicesManagerGTK(Gtk.Window):
             GLib.idle_add(btn_restart.set_tooltip_text, self.strings["tooltip_restart"])
         if hasattr(self, f"btn_install_{st.value}"):
             btn_install = getattr(self, f"btn_install_{st.value}")
-            GLib.idle_add(btn_install.set_tooltip_text, self.strings["tooltip_install"])
+            tooltip_key = "tooltip_install_ollama" if st == ServiceType.OLLAMA else "tooltip_install_venv"
+            GLib.idle_add(btn_install.set_tooltip_text, self.strings[tooltip_key])
         if hasattr(self, f"btn_mc_{st.value}"):
             btn_mc = getattr(self, f"btn_mc_{st.value}")
             GLib.idle_add(btn_mc.set_tooltip_text, self.strings["tooltip_mc"])
+        if hasattr(self, f"btn_thunar_{st.value}"):
+            btn_thunar = getattr(self, f"btn_thunar_{st.value}")
+            GLib.idle_add(btn_thunar.set_tooltip_text, self.strings["tooltip_thunar"])
         if hasattr(self, f"btn_exts_{st.value}"):
             btn_exts = getattr(self, f"btn_exts_{st.value}")
             GLib.idle_add(btn_exts.set_tooltip_text, self.strings["tooltip_extensions"])

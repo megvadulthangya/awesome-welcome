@@ -39,8 +39,9 @@ class ServiceWidget(Static):
                 yield Static(info_text, id=f"info-{self.service_type.value}", classes="service-info")
             with Container(classes="button-row"):
                 if self.profile.install_cmd:
+                    tooltip_key = "tooltip_install_ollama" if self.service_type == ServiceType.OLLAMA else "tooltip_install_venv"
                     yield Button(self.lang.t("install"), id=f"install-{self.service_type.value}",
-                                 tooltip=self.lang.t("tooltip_install"))
+                                 tooltip=self.lang.t(tooltip_key))
                 if self.profile.unit_name:
                     yield Button("...", id=f"enable-{self.service_type.value}",
                                  tooltip=self.lang.t("tooltip_enable"))
@@ -58,9 +59,20 @@ class ServiceWidget(Static):
                 if "mc" in self.profile.special_controls and self.profile.path:
                     yield Button(self.lang.t("open_mc"), id=f"mc-{self.service_type.value}",
                                  tooltip=self.lang.t("tooltip_mc"))
+                    yield Button(self.lang.t("open_thunar"), id=f"thunar-{self.service_type.value}",
+                                 tooltip=self.lang.t("tooltip_thunar"))
                 if "extensions" in self.profile.special_controls:
                     yield Button(self.lang.t("install_extensions"), id=f"exts-{self.service_type.value}",
                                  tooltip=self.lang.t("tooltip_extensions"))
+                if self.service_type == ServiceType.FORGE:
+                    yield Button(self.lang.t("forge_pip_refresh"), id="forge-pip-refresh",
+                                 tooltip=self.lang.t("tooltip_forge_pip_refresh"))
+                    yield Button(self.lang.t("forge_venv_rebuild"), id="forge-venv-rebuild",
+                                 tooltip=self.lang.t("tooltip_forge_venv_rebuild"))
+                    yield Button(self.lang.t("forge_switch_version"), id="forge-switch-version",
+                                 tooltip=self.lang.t("tooltip_forge_switch_version"))
+                    yield Button(self.lang.t("forge_purge"), id="forge-purge",
+                                 tooltip=self.lang.t("tooltip_forge_purge"))
                 if self.service_type == ServiceType.OLLAMA:
                     yield Button(self.lang.t("open_dockge"), id="open-dockge",
                                  tooltip=self.lang.t("tooltip_open_dockge"))
@@ -132,8 +144,19 @@ class ServiceWidget(Static):
         elif btn_id.startswith("mc-"):
             svc = btn_id.split("-")[1]
             self.open_mc(ServiceType(svc))
+        elif btn_id.startswith("thunar-"):
+            svc = btn_id.split("-")[1]
+            self.open_thunar(ServiceType(svc))
         elif btn_id.startswith("exts-"):
             self.install_extensions()
+        elif btn_id == "forge-pip-refresh":
+            self.forge_pip_refresh()
+        elif btn_id == "forge-venv-rebuild":
+            self.forge_venv_rebuild()
+        elif btn_id == "forge-switch-version":
+            self.forge_switch_version()
+        elif btn_id == "forge-purge":
+            self.forge_purge()
         elif btn_id == "open-dockge":
             webbrowser.open("http://localhost:5001")
 
@@ -203,8 +226,69 @@ class ServiceWidget(Static):
             downloads = os.path.expanduser("~/Downloads")
             execute_command(f"mc {downloads} {profile.path}", f"MC: {profile.key}", tui_app=self.app)
 
+    def open_thunar(self, st):
+        profile = SERVICE_REGISTRY[st]
+        if profile.path:
+            execute_command(f"thunar {profile.path}", f"Thunar: {profile.key}", tui_app=self.app)
+
     def install_extensions(self):
-        execute_command(_forge_extensions_install_command(), "Install Forge Extensions", tui_app=self.app)
+        from awesome_welcome.tui.dialogs import ExtensionsSelectModal
+        from awesome_welcome.services.forge import _forge_extensions_install_command
+
+        def handle_result(selected):
+            if selected:
+                execute_command(_forge_extensions_install_command(selected), "Install Forge Extensions", tui_app=self.app)
+
+        self.app.push_screen(ExtensionsSelectModal(self.lang), callback=handle_result)
+
+    def forge_pip_refresh(self):
+        from awesome_welcome.services.forge import detect_forge_flavor, forge_pip_refresh_command
+        flavor = detect_forge_flavor()
+        if flavor:
+            execute_command(forge_pip_refresh_command(flavor), "Forge: Pip Refresh", tui_app=self.app)
+
+    def forge_venv_rebuild(self):
+        from awesome_welcome.services.forge import detect_forge_flavor, forge_rebuild_venv_command
+        from awesome_welcome.tui.dialogs import ConfirmDialog
+        flavor = detect_forge_flavor()
+        if not flavor:
+            return
+
+        def do_rebuild(confirmed):
+            if confirmed:
+                execute_command(forge_rebuild_venv_command(flavor), "Forge: Rebuild venv", tui_app=self.app)
+
+        self.app.push_screen(ConfirmDialog(self.lang.t("forge_confirm_rebuild")), callback=do_rebuild)
+
+    def forge_switch_version(self):
+        from awesome_welcome.tui.dialogs import ForgeVersionSelectModal
+        self.app.push_screen(ForgeVersionSelectModal(self.lang), callback=self._handle_version_switch)
+
+    def _handle_version_switch(self, selected_pkg):
+        if selected_pkg:
+            from awesome_welcome.services.forge import detect_forge_package, forge_purge_command, forge_install_package_command
+            current_pkg = detect_forge_package()
+            cmd_parts = []
+            if current_pkg:
+                cmd_parts.append(forge_purge_command(current_pkg))
+            cmd_parts.append(forge_install_package_command(selected_pkg))
+            execute_command(" && ".join(cmd_parts), "Forge: Switch Version", tui_app=self.app)
+            self.update_status()
+
+    def forge_purge(self):
+        from awesome_welcome.tui.dialogs import ConfirmDialog
+        from awesome_welcome.services.forge import detect_forge_package, forge_purge_command, FORGE_INSTALL_DIR
+
+        def do_purge(confirmed):
+            if confirmed:
+                pkg = detect_forge_package()
+                if pkg:
+                    execute_command(forge_purge_command(pkg), "Forge: Purge", tui_app=self.app)
+                else:
+                    execute_command(f"sudo rm -rf {FORGE_INSTALL_DIR}", "Forge: Remove files", tui_app=self.app)
+                self.update_status()
+
+        self.app.push_screen(ConfirmDialog(self.lang.t("forge_purge_warning")), callback=do_purge)
 
 
 class DockerWidget(Static):
