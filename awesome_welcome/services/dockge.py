@@ -4,6 +4,7 @@ import urllib.request
 import urllib.error
 
 from awesome_welcome.helpers import run_command
+from awesome_welcome.services.docker import _docker_prefix
 
 
 DOCKGE_COMPOSE_FILE = "/docker/dockge/docker-compose.yml"
@@ -33,18 +34,19 @@ def detect_dockge_running():
 
 
 def dockge_up_command():
+    prefix = _docker_prefix()
     return (
-        f"sudo docker compose -f {DOCKGE_COMPOSE_FILE} up -d && "
+        f"{prefix}docker compose -f {DOCKGE_COMPOSE_FILE} up -d && "
         f"sleep 30 && xdg-open {DOCKGE_URL}"
     )
 
 
 def dockge_stop_command():
-    return f"sudo docker compose -f {DOCKGE_COMPOSE_FILE} down"
+    return f"{_docker_prefix()}docker compose -f {DOCKGE_COMPOSE_FILE} down"
 
 
 def dockge_restart_command():
-    return f"sudo docker compose -f {DOCKGE_COMPOSE_FILE} restart"
+    return f"{_docker_prefix()}docker compose -f {DOCKGE_COMPOSE_FILE} restart"
 
 
 def dockge_open_command():
