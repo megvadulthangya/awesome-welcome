@@ -82,25 +82,38 @@ class AIServicesManagerTUI(App):
     Button:hover {{
         background: {NORD_COLORS['frost3']};
     }}
+    ModalScreen {{
+        align: center middle;
+    }}
     .dialog {{
         background: {NORD_COLORS['dark1']};
         border: thick {NORD_COLORS['red']};
-        padding: 2;
-        margin: 10 20;
+        padding: 1 2;
+        width: auto;
+        height: auto;
+        max-width: 90%;
+        max-height: 90%;
     }}
     .dialog-message {{
         color: {NORD_COLORS['light1']};
-        padding: 1;
+        padding: 0 1;
+        height: auto;
+        width: auto;
     }}
     .dialog-buttons {{
         margin-top: 1;
+        height: auto;
+        width: auto;
         align: center middle;
     }}
     .dryrun-dialog {{
         background: {NORD_COLORS['dark1']};
         border: thick {NORD_COLORS['frost1']};
-        padding: 2;
-        margin: 10 20;
+        padding: 1 2;
+        width: auto;
+        height: auto;
+        max-width: 90%;
+        max-height: 90%;
     }}
     .dryrun-message {{
         color: {NORD_COLORS['light1']};
