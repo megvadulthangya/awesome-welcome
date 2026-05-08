@@ -45,15 +45,28 @@ def docker_restart_command():
 
 
 def docker_prune_command():
-    """Cleanup unused Docker stuff: stopped containers, dangling images, unused networks, build cache."""
-    return "docker system prune -f"
+    """Cleanup unused Docker stuff: stopped containers, dangling images, unused networks, build cache.
+
+    Uses sudo because the docker socket usually requires root or membership in
+    the `docker` group. Without sudo the command fails with
+    `permission denied while trying to connect to the docker API at
+    unix:///var/run/docker.sock` on systems where the user hasn't been added
+    to the docker group.
+    """
+    return "sudo docker system prune -f"
 
 
 def docker_prune_images_command():
-    """Cleanup unused Docker stuff + unused images."""
-    return "docker system prune -a -f"
+    """Cleanup unused Docker stuff + unused images.
+
+    Uses sudo for the same reason as docker_prune_command.
+    """
+    return "sudo docker system prune -a -f"
 
 
 def docker_prune_volumes_command():
-    """Cleanup unused Docker stuff + unused images + unused volumes (DESTRUCTIVE)."""
-    return "docker system prune -a --volumes -f"
+    """Cleanup unused Docker stuff + unused images + unused volumes (DESTRUCTIVE).
+
+    Uses sudo for the same reason as docker_prune_command.
+    """
+    return "sudo docker system prune -a --volumes -f"
