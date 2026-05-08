@@ -2,7 +2,6 @@
 import gi
 import os
 import subprocess
-import threading
 import sys
 import webbrowser
 
@@ -11,16 +10,6 @@ from gi.repository import Gtk, Gdk, GLib
 
 # --- KONFIGURÁCIÓ ---
 APP_TITLE = "Manjaro Awsome Respin Welcome"
-
-# Okos útvonalválasztás:
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOCAL_WRAPPER = os.path.join(CURRENT_DIR, "xl-wrapper.sh")
-
-# Ha mellette van a script (tesztelésnél), azt használjuk, amúgy a rendszert
-if os.path.exists(LOCAL_WRAPPER):
-    XLIBRE_SCRIPT = LOCAL_WRAPPER
-else:
-    XLIBRE_SCRIPT = "/usr/lib/awesome-welcome/xl-wrapper.sh"
 
 # Útvonalak az autostart logikához
 AUTOSTART_DIR = os.path.expanduser("~/.config/autostart")
@@ -64,7 +53,7 @@ class AwesomeWelcome(Gtk.Window):
     def __init__(self):
         super().__init__(title=APP_TITLE)
         self.set_border_width(20)
-        self.set_default_size(700, 600) # Kicsit nagyobbra vettem a magasságot az új gomb miatt
+        self.set_default_size(700, 550) # Kicsit nagyobbra vettem a magasságot az új gomb miatt
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_resizable(False)
 
@@ -128,17 +117,10 @@ class AwesomeWelcome(Gtk.Window):
             grid.set_row_spacing(10)
             grid.set_halign(Gtk.Align.CENTER)
             
-            # Gomb 1: XLibre
-            self.btn_xlibre = Gtk.Button(label="Install XLibre")
-            self.btn_xlibre.get_style_context().add_class("action-btn")
-            self.btn_xlibre.set_size_request(250, 50)
-            self.btn_xlibre.connect("clicked", self.on_install_xlibre)
-            grid.attach(self.btn_xlibre, 0, 0, 1, 1) # 0. oszlop, 0. sor
-
-            # Gomb 2: Applications (Pamac)
+            # Gomb 1: Applications (Pamac)
             btn_pamac = Gtk.Button(label="Manage Software")
             btn_pamac.get_style_context().add_class("action-btn")
-            btn_pamac.set_size_request(250, 50)
+            btn_pamac.set_size_request(510, 50)
             btn_pamac.set_tooltip_text("Open Pamac Software Manager")
             
             try:
@@ -149,16 +131,15 @@ class AwesomeWelcome(Gtk.Window):
                 pass
             
             btn_pamac.connect("clicked", self.on_open_pamac)
-            grid.attach(btn_pamac, 1, 0, 1, 1) # 1. oszlop, 0. sor
+            grid.attach(btn_pamac, 0, 0, 1, 1)
             
-            # --- ÚJ GOMB: Nordic Wallpapers ---
+            # Gomb 2: Nordic Wallpapers
             btn_wall = Gtk.Button(label="Install Nordic Wallpapers")
             btn_wall.get_style_context().add_class("action-btn")
-            btn_wall.set_size_request(510, 50) # Szélesebb, hogy kitöltse az alját
+            btn_wall.set_size_request(510, 50)
             btn_wall.set_tooltip_text("Installs 'nordic-backgrounds' package")
 
             try:
-                # Háttérkép ikon használata
                 icon_wall = Gtk.Image.new_from_icon_name("preferences-desktop-wallpaper", Gtk.IconSize.BUTTON)
                 btn_wall.set_image(icon_wall)
                 btn_wall.set_always_show_image(True)
@@ -166,8 +147,7 @@ class AwesomeWelcome(Gtk.Window):
                 pass
 
             btn_wall.connect("clicked", self.on_install_wallpapers)
-            # A grid-hez csatoljuk: 0. oszlop, 1. sor, 2 oszlop szélességben (span)
-            grid.attach(btn_wall, 0, 1, 2, 1)
+            grid.attach(btn_wall, 0, 1, 1, 1)
             
             main_actions_box.pack_start(grid, False, False, 0)
 
@@ -266,30 +246,6 @@ class AwesomeWelcome(Gtk.Window):
             self.close()
         except Exception as e:
             self.show_error(f"Failed to launch installer: {e}")
-
-    def on_install_xlibre(self, widget):
-        widget.set_sensitive(False)
-        widget.set_label("Installing XLibre...")
-        thread = threading.Thread(target=self._run_xlibre_script)
-        thread.daemon = True
-        thread.start()
-
-    def _run_xlibre_script(self):
-        try:
-            if not os.path.exists(XLIBRE_SCRIPT):
-                raise FileNotFoundError(f"Script not found: {XLIBRE_SCRIPT}")
-            result = subprocess.run([XLIBRE_SCRIPT], check=True, capture_output=True, text=True)
-            GLib.idle_add(self._on_xlibre_success)
-        except Exception as e:
-            GLib.idle_add(self.show_error, str(e))
-            GLib.idle_add(self._reset_xlibre_btn)
-
-    def _on_xlibre_success(self):
-        self.btn_xlibre.set_label("XLibre Installed ✓")
-    
-    def _reset_xlibre_btn(self):
-        self.btn_xlibre.set_label("Install XLibre Config")
-        self.btn_xlibre.set_sensitive(True)
 
     def show_error(self, message):
         dialog = Gtk.MessageDialog(
