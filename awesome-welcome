@@ -9,7 +9,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib
 
 # --- KONFIGURÁCIÓ ---
-APP_TITLE = "Manjaro Awsome Respin Welcome"
+APP_TITLE = "Manjaro Awesome Respin Welcome"
 
 # Útvonalak az autostart logikához
 AUTOSTART_DIR = os.path.expanduser("~/.config/autostart")

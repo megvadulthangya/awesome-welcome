@@ -25,9 +25,6 @@ prepare() {
   
   # Fix Exec path in desktop file
   sed -i "s|Exec=/usr/local/bin/awesome-welcome|Exec=/usr/bin/awesome-welcome|" awesome-welcome.desktop
-  
-  # Fix typo in APP_TITLE
-  sed -i 's/APP_TITLE = "Manjaro Awsome Respin Welcome"/APP_TITLE = "Manjaro Awesome Respin Welcome"/' awesome-welcome
 }
 
 package() {
