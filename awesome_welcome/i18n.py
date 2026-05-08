@@ -131,6 +131,9 @@ STRINGS = {
         "models_info_forge": "\U0001f4c1 Central model storage: Place all models, LoRAs, VAEs, embeddings, hypernetworks, and ControlNet models here. ComfyUI and Kohya_ss will read from this directory \u2014 no need to duplicate files.",
         "models_info_comfy": "\U0001f517 ComfyUI uses models from SD WebUI Forge directory. No need to copy models here \u2014 just place everything in the Forge folder.",
         "models_info_kohya": "\U0001f517 Kohya_ss uses models from SD WebUI Forge directory. No need to copy models here \u2014 just place everything in the Forge folder.",
+        "models_info_ollama": "\U0001f9e0 Local LLM runtime. Ollama runs language models (Llama, Mistral, Gemma, etc.) on your own GPU/CPU. Use the WebUI button to chat through your browser \u2014 the URL is configurable for cloudflared or remote hosting.",
+        "models_info_docker": "\U0001f433 Container runtime. Docker is required to run Dockge and any other container-based services on this system. Use the cleanup buttons periodically to free disk space from unused images and stopped containers.",
+        "models_info_dockge": "\U0001f4e6 Compose stack manager. Dockge is a web UI for managing docker-compose stacks at http://localhost:5001. Spin it up to deploy and monitor self-hosted services with a friendly interface.",
     },
     "hu": {
         "window_title": "AI Szolg\u00e1ltat\u00e1skezel\u0151",
@@ -262,6 +265,9 @@ STRINGS = {
         "models_info_forge": "\U0001f4c1 K\u00f6zponti modell t\u00e1rol\u00f3: Minden modellt, LoRA-t, VAE-t, embedding-et, hypernetwork-\u00f6t \u00e9s ControlNet modellt ide helyezz el. A ComfyUI \u00e9s a Kohya_ss ebb\u0151l a mapp\u00e1b\u00f3l olvas \u2014 nem kell duplik\u00e1lni a f\u00e1jlokat.",
         "models_info_comfy": "\U0001f517 A ComfyUI az SD WebUI Forge mapp\u00e1j\u00e1b\u00f3l haszn\u00e1lja a modelleket. Nem kell ide m\u00e1solni semmit \u2014 csak a Forge mapp\u00e1ba rakj mindent.",
         "models_info_kohya": "\U0001f517 A Kohya_ss az SD WebUI Forge mapp\u00e1j\u00e1b\u00f3l haszn\u00e1lja a modelleket. Nem kell ide m\u00e1solni semmit \u2014 csak a Forge mapp\u00e1ba rakj mindent.",
+        "models_info_ollama": "\U0001f9e0 Helyi LLM futtat\u00f3k\u00f6rnyezet. Az Ollama nyelvi modelleket (Llama, Mistral, Gemma stb.) futtat saj\u00e1t GPU-n vagy CPU-n. A WebUI gombbal b\u00f6ng\u00e9sz\u0151b\u0151l cset\u00e1lhatsz \u2014 az URL m\u00f3dos\u00edthat\u00f3, ha cloudflareden vagy t\u00e1voli hostingon szeretn\u00e9d futtatni.",
+        "models_info_docker": "\U0001f433 Container futtat\u00f3k\u00f6rnyezet. A Docker sz\u00fcks\u00e9ges a Dockge \u00e9s minden m\u00e1s container alap\u00fa szolg\u00e1ltat\u00e1s futtat\u00e1s\u00e1hoz ezen a rendszeren. \u00cddonk\u00e9nt haszn\u00e1ld a takar\u00edt\u00f3 gombokat lemezhely felszabad\u00edt\u00e1s\u00e1ra a nem haszn\u00e1lt image-ek \u00e9s le\u00e1ll\u00edtott containerek mell\u0151l.",
+        "models_info_dockge": "\U0001f4e6 Compose stack kezel\u0151. A Dockge egy webes fel\u00fclet docker-compose stackek kezel\u00e9s\u00e9hez a http://localhost:5001 c\u00edmen. Ind\u00edtsd el, hogy bar\u00e1ts\u00e1gos fel\u00fcleten telep\u00edthess \u00e9s \u00f6sszen\u00e9zhess self-hosted szolg\u00e1ltat\u00e1sokat.",
     }
 }
 

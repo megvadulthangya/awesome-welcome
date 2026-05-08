@@ -82,16 +82,46 @@ def forge_install_package_command(pkg):
     return f"sudo pacman -S --noconfirm {pkg}"
 
 
+FORGE_PACKAGES = [
+    "stable-diffusion-webui-forge-neo-git",
+    "stable-diffusion-webui-forge-cu124",
+    "stable-diffusion-webui-forge",
+]
+
+
 def detect_forge_package():
-    """Detect which pacman package is installed."""
+    """Detect which pacman package is installed.
+
+    Tries `pacman -Qq` once to enumerate all installed packages, then matches
+    against our known package names. Falls back to per-name `pacman -Q` if the
+    enumeration fails (e.g. limited PATH in launcher environments).
+
+    Order matters: more specific names (-neo-git, -cu124) are checked first
+    so they take precedence over the base "stable-diffusion-webui-forge"
+    name in any defensive substring matching.
+    """
     import subprocess
-    for pkg_name in [
-        "stable-diffusion-webui-forge",
-        "stable-diffusion-webui-forge-cu124",
-        "stable-diffusion-webui-forge-neo-git",
-    ]:
+    import shutil
+
+    pacman = shutil.which("pacman") or "/usr/bin/pacman"
+
+    try:
+        result = subprocess.run(
+            [pacman, "-Qq"], capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            installed = set(result.stdout.split())
+            for pkg in FORGE_PACKAGES:
+                if pkg in installed:
+                    return pkg
+    except Exception:
+        pass
+
+    for pkg_name in FORGE_PACKAGES:
         try:
-            result = subprocess.run(["pacman", "-Q", pkg_name], capture_output=True, text=True)
+            result = subprocess.run(
+                [pacman, "-Q", pkg_name], capture_output=True, text=True, timeout=5
+            )
             if result.returncode == 0:
                 return pkg_name
         except Exception:

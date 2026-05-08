@@ -350,6 +350,14 @@ class AIServicesManagerGTK(Gtk.Window):
         box.pack_start(hbox_title, False, False, 0)
         self.docker_status_label = status
 
+        info_label = Gtk.Label(label=self.strings["models_info_docker"])
+        info_label.get_style_context().add_class("service-info")
+        info_label.set_line_wrap(True)
+        info_label.set_xalign(0.0)
+        info_label.set_max_width_chars(80)
+        box.pack_start(info_label, False, False, 0)
+        self.docker_info_label = info_label
+
         btn_box = Gtk.FlowBox()
         btn_box.set_selection_mode(Gtk.SelectionMode.NONE)
         btn_box.set_homogeneous(False)
@@ -418,6 +426,14 @@ class AIServicesManagerGTK(Gtk.Window):
         hbox_title.pack_end(status, False, False, 0)
         box.pack_start(hbox_title, False, False, 0)
         self.dockge_status_label = status
+
+        info_label = Gtk.Label(label=self.strings["models_info_dockge"])
+        info_label.get_style_context().add_class("service-info")
+        info_label.set_line_wrap(True)
+        info_label.set_xalign(0.0)
+        info_label.set_max_width_chars(80)
+        box.pack_start(info_label, False, False, 0)
+        self.dockge_info_label = info_label
 
         btn_box = Gtk.FlowBox()
         btn_box.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -544,7 +560,8 @@ class AIServicesManagerGTK(Gtk.Window):
             transient_for=self,
             flags=0,
         )
-        dialog.set_default_size(1000, 800)
+        dialog.set_default_size(700, 550)
+        dialog.set_resizable(True)
 
         content = dialog.get_content_area()
         content.set_spacing(10)
@@ -554,7 +571,7 @@ class AIServicesManagerGTK(Gtk.Window):
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_min_content_height(640)
+        scrolled.set_min_content_height(380)
 
         listbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         checks = []
