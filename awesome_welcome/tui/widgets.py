@@ -145,6 +145,15 @@ class ServiceWidget(Static):
                 btn_remove.disabled = not detect_ollama_installed()
             except Exception:
                 pass
+            try:
+                btn_webui = self.query_one("#ollama-webui", Button)
+                webui_ready = detect_docker_installed() and detect_dockge_running()
+                btn_webui.disabled = not webui_ready
+                btn_webui.tooltip = self.lang.t(
+                    "tooltip_open_webui" if webui_ready else "tooltip_open_webui_disabled"
+                )
+            except Exception:
+                pass
 
     def get_status_text(self):
         profile = self.profile

@@ -115,11 +115,15 @@ class AIServicesManagerGTK(Gtk.Window):
         if dockge_page:
             label = self.notebook.get_tab_label(dockge_page)
             label.set_text(self.strings["service_dockge"])
-        for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY]:
+        for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]:
             info_key = f"models_info_{st.value}"
             if hasattr(self, f"info_label_{st.value}"):
                 info_label = getattr(self, f"info_label_{st.value}")
                 GLib.idle_add(info_label.set_markup, f"<i>{self.strings[info_key]}</i>")
+        if hasattr(self, "docker_info_label"):
+            GLib.idle_add(self.docker_info_label.set_text, self.strings["models_info_docker"])
+        if hasattr(self, "dockge_info_label"):
+            GLib.idle_add(self.dockge_info_label.set_text, self.strings["models_info_dockge"])
         self.refresh_all()
 
     def create_service_tabs(self):
@@ -185,6 +189,16 @@ class AIServicesManagerGTK(Gtk.Window):
             info_label.set_markup(f"<i>{self.strings['models_info_kohya']}</i>")
             info_label.set_line_wrap(True)
             info_label.set_xalign(0)
+            info_label.set_margin_top(5)
+            info_label.set_margin_bottom(5)
+            box.pack_start(info_label, False, False, 0)
+            setattr(self, f"info_label_{st.value}", info_label)
+        elif st == ServiceType.OLLAMA:
+            info_label = Gtk.Label()
+            info_label.set_markup(f"<i>{self.strings['models_info_ollama']}</i>")
+            info_label.set_line_wrap(True)
+            info_label.set_xalign(0)
+            info_label.set_max_width_chars(80)
             info_label.set_margin_top(5)
             info_label.set_margin_bottom(5)
             box.pack_start(info_label, False, False, 0)
@@ -973,7 +987,10 @@ class AIServicesManagerGTK(Gtk.Window):
             GLib.idle_add(self.forge_installed_label.set_markup, f"<b>{txt}</b>")
         if st == ServiceType.OLLAMA:
             if hasattr(self, "btn_ollama_webui"):
-                GLib.idle_add(self.btn_ollama_webui.set_tooltip_text, self.strings["tooltip_open_webui"])
+                webui_ready = detect_docker_installed() and detect_dockge_running()
+                GLib.idle_add(self.btn_ollama_webui.set_sensitive, webui_ready)
+                tip_key = "tooltip_open_webui" if webui_ready else "tooltip_open_webui_disabled"
+                GLib.idle_add(self.btn_ollama_webui.set_tooltip_text, self.strings[tip_key])
             if hasattr(self, "btn_ollama_edit_url"):
                 GLib.idle_add(self.btn_ollama_edit_url.set_tooltip_text, self.strings["tooltip_edit_webui_url"])
                 GLib.idle_add(self.btn_ollama_edit_url.set_label, self.strings["edit_webui_url"])
