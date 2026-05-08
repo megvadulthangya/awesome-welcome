@@ -6,7 +6,7 @@ from textual.binding import Binding
 from awesome_welcome.config import NORD_COLORS
 from awesome_welcome.models import ServiceType, SERVICE_REGISTRY
 from awesome_welcome.i18n import LanguageManager
-from awesome_welcome.tui.widgets import ServiceWidget, DockerWidget
+from awesome_welcome.tui.widgets import ServiceWidget, DockerWidget, DockgeWidget
 
 
 class AIServicesManagerTUI(App):
@@ -114,7 +114,9 @@ class AIServicesManagerTUI(App):
         background: {NORD_COLORS['dark1']};
         border: thick {NORD_COLORS['frost1']};
         padding: 2;
-        margin: 5 10;
+        margin: 2 4;
+        height: 90%;
+        width: 90%;
     }}
     .ext-title {{
         color: {NORD_COLORS['frost1']};
@@ -122,12 +124,19 @@ class AIServicesManagerTUI(App):
         padding: 1;
     }}
     .ext-list {{
-        height: 15;
+        height: 1fr;
         margin: 1;
     }}
     .ext-buttons {{
         margin-top: 1;
         align: center middle;
+    }}
+    Checkbox.-on {{
+        color: {NORD_COLORS['green']};
+        text-style: bold;
+    }}
+    Checkbox > .toggle--button {{
+        color: {NORD_COLORS['green']};
     }}
     """
 
@@ -145,6 +154,8 @@ class AIServicesManagerTUI(App):
                     yield ServiceWidget(st, self.lang)
             with TabPane(self.lang.t("service_docker"), id="docker"):
                 yield DockerWidget(self.lang)
+            with TabPane(self.lang.t("service_dockge"), id="dockge"):
+                yield DockgeWidget(self.lang)
 
     def on_mount(self):
         self.set_interval(5, self.refresh_all)
@@ -158,6 +169,16 @@ class AIServicesManagerTUI(App):
                 widget.update_status()
             except Exception:
                 pass
+        try:
+            pane = self.query_one("#docker")
+            pane.query_one(DockerWidget).update_status()
+        except Exception:
+            pass
+        try:
+            pane = self.query_one("#dockge")
+            pane.query_one(DockgeWidget).update_status()
+        except Exception:
+            pass
 
     def action_toggle_language(self):
         self.lang.toggle()
@@ -169,6 +190,8 @@ class AIServicesManagerTUI(App):
                 pane.label = self.lang.t(profile.display_name_key)
             elif pane.id == "docker":
                 pane.label = self.lang.t("service_docker")
+            elif pane.id == "dockge":
+                pane.label = self.lang.t("service_dockge")
         self.refresh_all()
 
     def action_quit(self):

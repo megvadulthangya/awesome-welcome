@@ -19,6 +19,19 @@ from awesome_welcome.services.kohya import (
     KOHYA_SESSION, KOHYA_UNIT, KOHYA_USER, KOHYA_DIR
 )
 from awesome_welcome.services.forge import _forge_extensions_install_command
+from awesome_welcome.services.ollama import (
+    detect_ollama_installed, ollama_update_command, ollama_uninstall_command,
+    get_webui_url, set_webui_url
+)
+from awesome_welcome.services.docker import (
+    detect_docker_installed, docker_install_command, docker_reinstall_command,
+    docker_start_command, docker_stop_command, docker_restart_command,
+    docker_prune_command, docker_prune_images_command, docker_prune_volumes_command,
+)
+from awesome_welcome.services.dockge import (
+    detect_dockge_running, dockge_up_command, dockge_stop_command,
+    dockge_restart_command, dockge_open_command,
+)
 from awesome_welcome.gui.css import CSS_DATA
 
 
@@ -98,6 +111,10 @@ class AIServicesManagerGTK(Gtk.Window):
         docker_page = self.notebook.get_nth_page(4)
         label = self.notebook.get_tab_label(docker_page)
         label.set_text(self.strings["service_docker"])
+        dockge_page = self.notebook.get_nth_page(5)
+        if dockge_page:
+            label = self.notebook.get_tab_label(dockge_page)
+            label.set_text(self.strings["service_dockge"])
         for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY]:
             info_key = f"models_info_{st.value}"
             if hasattr(self, f"info_label_{st.value}"):
@@ -115,6 +132,10 @@ class AIServicesManagerGTK(Gtk.Window):
         docker_page = self.create_docker_page()
         label = Gtk.Label(label=self.strings["service_docker"])
         self.notebook.append_page(docker_page, label)
+
+        dockge_page = self.create_dockge_page()
+        label = Gtk.Label(label=self.strings["service_dockge"])
+        self.notebook.append_page(dockge_page, label)
 
     def create_service_page(self, st, profile):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -143,6 +164,13 @@ class AIServicesManagerGTK(Gtk.Window):
             info_label.set_margin_bottom(5)
             box.pack_start(info_label, False, False, 0)
             setattr(self, f"info_label_{st.value}", info_label)
+
+            installed_label = Gtk.Label()
+            installed_label.set_xalign(0)
+            installed_label.set_margin_top(2)
+            installed_label.set_margin_bottom(2)
+            box.pack_start(installed_label, False, False, 0)
+            self.forge_installed_label = installed_label
         elif st == ServiceType.COMFY:
             info_label = Gtk.Label()
             info_label.set_markup(f"<i>{self.strings['models_info_comfy']}</i>")
@@ -173,7 +201,10 @@ class AIServicesManagerGTK(Gtk.Window):
             btn_install = Gtk.Button(label=self.strings["install"])
             btn_install.get_style_context().add_class("service-button")
             btn_install.set_tooltip_text(self.strings[tooltip_key])
-            btn_install.connect("clicked", self.on_install_clicked, st)
+            if st == ServiceType.OLLAMA:
+                btn_install.connect("clicked", self.on_install_clicked_ollama_aware, st)
+            else:
+                btn_install.connect("clicked", self.on_install_clicked, st)
             btn_box.add(btn_install)
             setattr(self, f"btn_install_{st.value}", btn_install)
 
@@ -274,12 +305,26 @@ class AIServicesManagerGTK(Gtk.Window):
             self.btn_forge_purge = btn_purge
 
         if st == ServiceType.OLLAMA:
-            btn_dockge = Gtk.Button(label=self.strings["open_dockge"])
-            btn_dockge.get_style_context().add_class("service-button")
-            btn_dockge.set_tooltip_text(self.strings["tooltip_open_dockge"])
-            btn_dockge.connect("clicked", lambda x: webbrowser.open("http://localhost:5001"))
-            btn_box.add(btn_dockge)
-            self.btn_dockge = btn_dockge
+            btn_webui = Gtk.Button(label=self.strings["open_webui"])
+            btn_webui.get_style_context().add_class("service-button")
+            btn_webui.set_tooltip_text(self.strings["tooltip_open_webui"])
+            btn_webui.connect("clicked", self.on_open_webui)
+            btn_box.add(btn_webui)
+            self.btn_ollama_webui = btn_webui
+
+            btn_edit_url = Gtk.Button(label=self.strings["edit_webui_url"])
+            btn_edit_url.get_style_context().add_class("service-button")
+            btn_edit_url.set_tooltip_text(self.strings["tooltip_edit_webui_url"])
+            btn_edit_url.connect("clicked", self.on_edit_webui_url)
+            btn_box.add(btn_edit_url)
+            self.btn_ollama_edit_url = btn_edit_url
+
+            btn_remove = Gtk.Button(label=self.strings["remove_ollama"])
+            btn_remove.get_style_context().add_class("service-button")
+            btn_remove.set_tooltip_text(self.strings["tooltip_remove_ollama"])
+            btn_remove.connect("clicked", self.on_remove_ollama)
+            btn_box.add(btn_remove)
+            self.btn_ollama_remove = btn_remove
 
         box.pack_start(btn_box, False, False, 0)
 
@@ -293,25 +338,115 @@ class AIServicesManagerGTK(Gtk.Window):
         box.set_margin_start(20)
         box.set_margin_end(20)
 
+        hbox_title = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         title = Gtk.Label()
         title.get_style_context().add_class("service-title")
         title.set_text(self.strings["service_docker"])
-        box.pack_start(title, False, False, 0)
+        hbox_title.pack_start(title, False, False, 0)
+
+        status = Gtk.Label()
+        status.get_style_context().add_class("service-status")
+        hbox_title.pack_end(status, False, False, 0)
+        box.pack_start(hbox_title, False, False, 0)
+        self.docker_status_label = status
+
+        btn_box = Gtk.FlowBox()
+        btn_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        btn_box.set_homogeneous(False)
+        btn_box.set_column_spacing(5)
+        btn_box.set_row_spacing(5)
 
         btn_install = Gtk.Button(label=self.strings["install_docker"])
         btn_install.get_style_context().add_class("service-button")
         btn_install.set_tooltip_text(self.strings["tooltip_install_docker"])
         btn_install.connect("clicked", self.on_install_docker)
-        box.pack_start(btn_install, False, False, 0)
+        btn_box.add(btn_install)
         self.btn_docker_install = btn_install
+
+        btn_start = Gtk.Button(label=self.strings["start_docker"])
+        btn_start.get_style_context().add_class("service-button")
+        btn_start.set_tooltip_text(self.strings["tooltip_start_docker"])
+        btn_start.connect("clicked", self.on_docker_start_stop)
+        btn_box.add(btn_start)
+        self.btn_docker_start = btn_start
+
+        btn_restart = Gtk.Button(label=self.strings["restart_docker"])
+        btn_restart.get_style_context().add_class("service-button")
+        btn_restart.set_tooltip_text(self.strings["tooltip_restart_docker"])
+        btn_restart.connect("clicked", self.on_docker_restart)
+        btn_box.add(btn_restart)
+        self.btn_docker_restart = btn_restart
+
+        btn_clean1 = Gtk.Button(label=self.strings["cleanup_docker_basic"])
+        btn_clean1.get_style_context().add_class("service-button")
+        btn_clean1.set_tooltip_text(self.strings["tooltip_cleanup_docker_basic"])
+        btn_clean1.connect("clicked", self.on_docker_cleanup_basic)
+        btn_box.add(btn_clean1)
+        self.btn_docker_clean_basic = btn_clean1
+
+        btn_clean2 = Gtk.Button(label=self.strings["cleanup_docker_images"])
+        btn_clean2.get_style_context().add_class("service-button")
+        btn_clean2.set_tooltip_text(self.strings["tooltip_cleanup_docker_images"])
+        btn_clean2.connect("clicked", self.on_docker_cleanup_images)
+        btn_box.add(btn_clean2)
+        self.btn_docker_clean_images = btn_clean2
+
+        btn_clean3 = Gtk.Button(label=self.strings["cleanup_docker_volumes"])
+        btn_clean3.get_style_context().add_class("service-button")
+        btn_clean3.set_tooltip_text(self.strings["tooltip_cleanup_docker_volumes"])
+        btn_clean3.connect("clicked", self.on_docker_cleanup_volumes)
+        btn_box.add(btn_clean3)
+        self.btn_docker_clean_volumes = btn_clean3
+
+        box.pack_start(btn_box, False, False, 0)
+        return box
+
+    def create_dockge_page(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(20)
+        box.set_margin_start(20)
+        box.set_margin_end(20)
+
+        hbox_title = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        title = Gtk.Label()
+        title.get_style_context().add_class("service-title")
+        title.set_text(self.strings["service_dockge"])
+        hbox_title.pack_start(title, False, False, 0)
+
+        status = Gtk.Label()
+        status.get_style_context().add_class("service-status")
+        hbox_title.pack_end(status, False, False, 0)
+        box.pack_start(hbox_title, False, False, 0)
+        self.dockge_status_label = status
+
+        btn_box = Gtk.FlowBox()
+        btn_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        btn_box.set_homogeneous(False)
+        btn_box.set_column_spacing(5)
+        btn_box.set_row_spacing(5)
 
         btn_spin = Gtk.Button(label=self.strings["spin_dockge"])
         btn_spin.get_style_context().add_class("service-button")
         btn_spin.set_tooltip_text(self.strings["tooltip_spin_dockge"])
-        btn_spin.connect("clicked", self.on_spin_dockge)
-        box.pack_start(btn_spin, False, False, 0)
-        self.btn_docker_spin = btn_spin
+        btn_spin.connect("clicked", self.on_dockge_spin_stop)
+        btn_box.add(btn_spin)
+        self.btn_dockge_spin = btn_spin
 
+        btn_open = Gtk.Button(label=self.strings["open_dockge"])
+        btn_open.get_style_context().add_class("service-button")
+        btn_open.set_tooltip_text(self.strings["tooltip_open_dockge"])
+        btn_open.connect("clicked", self.on_dockge_open)
+        btn_box.add(btn_open)
+        self.btn_dockge_open = btn_open
+
+        btn_restart = Gtk.Button(label=self.strings["restart_dockge"])
+        btn_restart.get_style_context().add_class("service-button")
+        btn_restart.set_tooltip_text(self.strings["tooltip_restart_dockge"])
+        btn_restart.connect("clicked", self.on_dockge_restart)
+        btn_box.add(btn_restart)
+        self.btn_dockge_restart = btn_restart
+
+        box.pack_start(btn_box, False, False, 0)
         return box
 
     def on_install_clicked(self, btn, st):
@@ -409,7 +544,7 @@ class AIServicesManagerGTK(Gtk.Window):
             transient_for=self,
             flags=0,
         )
-        dialog.set_default_size(500, 400)
+        dialog.set_default_size(1000, 800)
 
         content = dialog.get_content_area()
         content.set_spacing(10)
@@ -419,7 +554,7 @@ class AIServicesManagerGTK(Gtk.Window):
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_min_content_height(300)
+        scrolled.set_min_content_height(640)
 
         listbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         checks = []
@@ -485,18 +620,34 @@ class AIServicesManagerGTK(Gtk.Window):
 
     def on_forge_switch_version(self, btn):
         from awesome_welcome.services.forge import detect_forge_package, forge_purge_command, forge_install_package_command
+        current_pkg = detect_forge_package()
+
         dialog = Gtk.Dialog(
             title=self.strings["forge_switch_version"],
             transient_for=self, flags=0,
         )
+        dialog.set_default_size(520, 320)
         content = dialog.get_content_area()
         content.set_spacing(10)
         content.set_margin_top(10)
         content.set_margin_start(10)
         content.set_margin_end(10)
 
+        if current_pkg:
+            installed = Gtk.Label()
+            installed.set_xalign(0)
+            installed.set_markup(
+                "<b>" + self.strings["forge_installed_label"].format(pkg=current_pkg) + "</b>"
+            )
+            content.pack_start(installed, False, False, 0)
+        else:
+            installed = Gtk.Label(label=self.strings["forge_not_installed_label"])
+            installed.set_xalign(0)
+            content.pack_start(installed, False, False, 0)
+
         warn = Gtk.Label(label=self.strings["forge_purge_warning"])
         warn.set_line_wrap(True)
+        warn.get_style_context().add_class("warning-label")
         content.pack_start(warn, False, False, 0)
 
         versions = [
@@ -516,25 +667,54 @@ class AIServicesManagerGTK(Gtk.Window):
             radios.append(rb)
             content.pack_start(rb, False, False, 0)
 
+        if current_pkg:
+            for rb in radios:
+                if rb.pkg_name == current_pkg:
+                    rb.set_active(True)
+                    break
+
         dialog.add_button(self.strings.get("ext_cancel", "Cancel"), Gtk.ResponseType.CANCEL)
         dialog.add_button("OK", Gtk.ResponseType.OK)
         dialog.show_all()
         response = dialog.run()
 
+        selected_pkg = None
         if response == Gtk.ResponseType.OK:
-            selected_pkg = None
             for rb in radios:
                 if rb.get_active():
                     selected_pkg = rb.pkg_name
                     break
-            if selected_pkg:
-                current_pkg = detect_forge_package()
-                cmd_parts = []
-                if current_pkg:
-                    cmd_parts.append(forge_purge_command(current_pkg))
-                cmd_parts.append(forge_install_package_command(selected_pkg))
-                execute_command(" && ".join(cmd_parts), "Forge: Switch Version", parent_gui=self)
         dialog.destroy()
+
+        if not selected_pkg:
+            return
+
+        if current_pkg and selected_pkg == current_pkg:
+            self._show_info(self.strings["forge_switch_no_change"])
+            return
+
+        confirm = Gtk.MessageDialog(
+            transient_for=self, flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.OK_CANCEL,
+            text=self.strings["forge_switch_confirm_title"],
+        )
+        confirm.format_secondary_text(
+            self.strings["forge_switch_confirm_text"].format(
+                current=current_pkg or "-", target=selected_pkg
+            )
+        )
+        confirm_resp = confirm.run()
+        confirm.destroy()
+        if confirm_resp != Gtk.ResponseType.OK:
+            return
+
+        cmd_parts = []
+        if current_pkg:
+            cmd_parts.append(forge_purge_command(current_pkg))
+        cmd_parts.append(forge_install_package_command(selected_pkg))
+        execute_command(" && ".join(cmd_parts), "Forge: Switch Version", parent_gui=self)
+        self.refresh_service_state(ServiceType.FORGE)
 
     def on_forge_purge(self, btn):
         from awesome_welcome.services.forge import detect_forge_package, forge_purge_command, FORGE_INSTALL_DIR
@@ -565,18 +745,147 @@ class AIServicesManagerGTK(Gtk.Window):
         dialog.run()
         dialog.destroy()
 
-    def on_install_docker(self, btn):
-        execute_command("sudo pacman -S --needed docker docker-compose && sudo systemctl enable --now docker", "Install Docker", parent_gui=self)
+    def _show_info(self, message):
+        dialog = Gtk.MessageDialog(
+            transient_for=self, flags=0,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text=str(message),
+        )
+        dialog.run()
+        dialog.destroy()
 
-    def on_spin_dockge(self, btn):
-        execute_command("sudo docker compose -f /docker/dockge/docker-compose.yml up -d && sleep 30 && xdg-open http://localhost:5001", "Start Dockge", parent_gui=self)
+    def on_install_docker(self, btn):
+        if detect_docker_installed():
+            execute_command(docker_reinstall_command(), "Reinstall Docker", parent_gui=self)
+        else:
+            execute_command(docker_install_command(), "Install Docker", parent_gui=self)
+        self._refresh_docker_state()
+
+    def on_docker_start_stop(self, btn):
+        if not detect_docker_installed():
+            return
+        if check_systemd_unit_active("docker.service"):
+            execute_command(docker_stop_command(), "Stop Docker", parent_gui=self)
+        else:
+            execute_command(docker_start_command(), "Start Docker", parent_gui=self)
+        self._refresh_docker_state()
+
+    def on_docker_restart(self, btn):
+        if not detect_docker_installed():
+            return
+        execute_command(docker_restart_command(), "Restart Docker", parent_gui=self)
+        self._refresh_docker_state()
+
+    def on_docker_cleanup_basic(self, btn):
+        if not detect_docker_installed():
+            return
+        execute_command(docker_prune_command(), "Docker cleanup", parent_gui=self)
+
+    def on_docker_cleanup_images(self, btn):
+        if not detect_docker_installed():
+            return
+        execute_command(docker_prune_images_command(), "Docker cleanup + images", parent_gui=self)
+
+    def on_docker_cleanup_volumes(self, btn):
+        if not detect_docker_installed():
+            return
+        confirm = Gtk.MessageDialog(
+            transient_for=self, flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.OK_CANCEL,
+            text=self.strings["cleanup_docker_volumes_warning"],
+        )
+        resp = confirm.run()
+        confirm.destroy()
+        if resp == Gtk.ResponseType.OK:
+            execute_command(docker_prune_volumes_command(), "Docker cleanup + volumes", parent_gui=self)
+
+    def on_dockge_spin_stop(self, btn):
+        if detect_dockge_running():
+            execute_command(dockge_stop_command(), "Stop Dockge", parent_gui=self)
+        else:
+            execute_command(dockge_up_command(), "Spin up Dockge", parent_gui=self)
+        self._refresh_dockge_state()
+
+    def on_dockge_open(self, btn):
+        execute_command(dockge_open_command(), "Open Dockge", parent_gui=self)
+
+    def on_dockge_restart(self, btn):
+        execute_command(dockge_restart_command(), "Restart Dockge", parent_gui=self)
+        self._refresh_dockge_state()
+
+    def on_open_webui(self, btn):
+        url = get_webui_url()
+        try:
+            webbrowser.open(url)
+        except Exception as e:
+            self._show_error(str(e))
+
+    def on_edit_webui_url(self, btn):
+        dialog = Gtk.Dialog(
+            title=self.strings["webui_url_dialog_title"],
+            transient_for=self, flags=0,
+        )
+        dialog.set_default_size(420, 120)
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        content.set_margin_top(10)
+        content.set_margin_start(10)
+        content.set_margin_end(10)
+
+        prompt = Gtk.Label(label=self.strings["webui_url_dialog_prompt"])
+        prompt.set_xalign(0)
+        content.pack_start(prompt, False, False, 0)
+
+        entry = Gtk.Entry()
+        entry.set_text(get_webui_url())
+        entry.set_activates_default(True)
+        content.pack_start(entry, False, False, 0)
+
+        dialog.add_button(self.strings["ext_cancel"], Gtk.ResponseType.CANCEL)
+        ok_btn = dialog.add_button("OK", Gtk.ResponseType.OK)
+        ok_btn.set_can_default(True)
+        ok_btn.grab_default()
+        dialog.show_all()
+        resp = dialog.run()
+        new_url = entry.get_text().strip()
+        dialog.destroy()
+        if resp == Gtk.ResponseType.OK and new_url:
+            try:
+                set_webui_url(new_url)
+                self._show_info(self.strings["webui_url_saved"])
+            except Exception as e:
+                self._show_error(str(e))
+
+    def on_install_clicked_ollama_aware(self, btn, st):
+        """Wrap Install/Update for Ollama: re-runs the install script either way."""
+        if st == ServiceType.OLLAMA and detect_ollama_installed():
+            execute_command(ollama_update_command(), "Update Ollama", parent_gui=self)
+        else:
+            self.on_install_clicked(btn, st)
+        self.refresh_service_state(st)
+
+    def on_remove_ollama(self, btn):
+        confirm = Gtk.MessageDialog(
+            transient_for=self, flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.OK_CANCEL,
+            text=self.strings["ollama_remove_warning"],
+        )
+        resp = confirm.run()
+        confirm.destroy()
+        if resp == Gtk.ResponseType.OK:
+            execute_command(ollama_uninstall_command(), "Remove Ollama", parent_gui=self)
+            self.refresh_service_state(ServiceType.OLLAMA)
 
     def refresh_service_state(self, st):
         profile = SERVICE_REGISTRY[st]
         status_label = getattr(self, f"status_label_{st.value}")
 
-        installed = False
-        if profile.path:
+        if st == ServiceType.OLLAMA:
+            installed = detect_ollama_installed()
+        elif profile.path:
             if profile.requires_setup_done:
                 installed = check_setup_done(profile.path)
             else:
@@ -614,8 +923,16 @@ class AIServicesManagerGTK(Gtk.Window):
             GLib.idle_add(btn_restart.set_tooltip_text, self.strings["tooltip_restart"])
         if hasattr(self, f"btn_install_{st.value}"):
             btn_install = getattr(self, f"btn_install_{st.value}")
-            tooltip_key = "tooltip_install_ollama" if st == ServiceType.OLLAMA else "tooltip_install_venv"
-            GLib.idle_add(btn_install.set_tooltip_text, self.strings[tooltip_key])
+            if st == ServiceType.OLLAMA:
+                if installed:
+                    GLib.idle_add(btn_install.set_label, self.strings["update_ollama"])
+                    GLib.idle_add(btn_install.set_tooltip_text, self.strings["tooltip_update_ollama"])
+                else:
+                    GLib.idle_add(btn_install.set_label, self.strings["install"])
+                    GLib.idle_add(btn_install.set_tooltip_text, self.strings["tooltip_install_ollama"])
+            else:
+                GLib.idle_add(btn_install.set_label, self.strings["install"])
+                GLib.idle_add(btn_install.set_tooltip_text, self.strings["tooltip_install_venv"])
         if hasattr(self, f"btn_mc_{st.value}"):
             btn_mc = getattr(self, f"btn_mc_{st.value}")
             GLib.idle_add(btn_mc.set_tooltip_text, self.strings["tooltip_mc"])
@@ -629,19 +946,110 @@ class AIServicesManagerGTK(Gtk.Window):
             GLib.idle_add(self.btn_kohya_gpu.set_tooltip_text, self.strings["tooltip_kohya_gpu"])
             GLib.idle_add(self.btn_kohya_cpu.set_tooltip_text, self.strings["tooltip_kohya_cpu"])
             GLib.idle_add(self.btn_kohya_inspect.set_tooltip_text, self.strings["tooltip_inspect"])
-        if st == ServiceType.OLLAMA and hasattr(self, 'btn_dockge'):
-            GLib.idle_add(self.btn_dockge.set_tooltip_text, self.strings["tooltip_open_dockge"])
+        if st == ServiceType.FORGE and hasattr(self, "forge_installed_label"):
+            from awesome_welcome.services.forge import detect_forge_package
+            pkg = detect_forge_package()
+            if pkg:
+                txt = self.strings["forge_installed_label"].format(pkg=pkg)
+            else:
+                txt = self.strings["forge_not_installed_label"]
+            GLib.idle_add(self.forge_installed_label.set_markup, f"<b>{txt}</b>")
+        if st == ServiceType.OLLAMA:
+            if hasattr(self, "btn_ollama_webui"):
+                GLib.idle_add(self.btn_ollama_webui.set_tooltip_text, self.strings["tooltip_open_webui"])
+            if hasattr(self, "btn_ollama_edit_url"):
+                GLib.idle_add(self.btn_ollama_edit_url.set_tooltip_text, self.strings["tooltip_edit_webui_url"])
+                GLib.idle_add(self.btn_ollama_edit_url.set_label, self.strings["edit_webui_url"])
+            if hasattr(self, "btn_ollama_remove"):
+                GLib.idle_add(self.btn_ollama_remove.set_tooltip_text, self.strings["tooltip_remove_ollama"])
+                GLib.idle_add(self.btn_ollama_remove.set_label, self.strings["remove_ollama"])
+                GLib.idle_add(self.btn_ollama_remove.set_sensitive, installed)
+
+    def _refresh_docker_state(self):
+        if not hasattr(self, "docker_status_label"):
+            return
+        installed = detect_docker_installed()
+        if not installed:
+            status = self.strings["docker_status_not_installed"]
+        elif check_systemd_unit_active("docker.service"):
+            status = self.strings["docker_status_running"]
+        else:
+            status = self.strings["docker_status_stopped"]
+        GLib.idle_add(self.docker_status_label.set_label, status)
+
+        if hasattr(self, "btn_docker_install"):
+            label_key = "reinstall_docker" if installed else "install_docker"
+            tip_key = "tooltip_reinstall_docker" if installed else "tooltip_install_docker"
+            GLib.idle_add(self.btn_docker_install.set_label, self.strings[label_key])
+            GLib.idle_add(self.btn_docker_install.set_tooltip_text, self.strings[tip_key])
+
+        for attr, sensitive in [
+            ("btn_docker_start", installed),
+            ("btn_docker_restart", installed),
+            ("btn_docker_clean_basic", installed),
+            ("btn_docker_clean_images", installed),
+            ("btn_docker_clean_volumes", installed),
+        ]:
+            if hasattr(self, attr):
+                GLib.idle_add(getattr(self, attr).set_sensitive, sensitive)
+
+        if installed and hasattr(self, "btn_docker_start"):
+            running = check_systemd_unit_active("docker.service")
+            label_key = "stop_docker" if running else "start_docker"
+            tip_key = "tooltip_stop_docker" if running else "tooltip_start_docker"
+            GLib.idle_add(self.btn_docker_start.set_label, self.strings[label_key])
+            GLib.idle_add(self.btn_docker_start.set_tooltip_text, self.strings[tip_key])
+
+        if hasattr(self, "btn_docker_restart"):
+            GLib.idle_add(self.btn_docker_restart.set_label, self.strings["restart_docker"])
+            GLib.idle_add(self.btn_docker_restart.set_tooltip_text, self.strings["tooltip_restart_docker"])
+        if hasattr(self, "btn_docker_clean_basic"):
+            GLib.idle_add(self.btn_docker_clean_basic.set_label, self.strings["cleanup_docker_basic"])
+            GLib.idle_add(self.btn_docker_clean_basic.set_tooltip_text, self.strings["tooltip_cleanup_docker_basic"])
+        if hasattr(self, "btn_docker_clean_images"):
+            GLib.idle_add(self.btn_docker_clean_images.set_label, self.strings["cleanup_docker_images"])
+            GLib.idle_add(self.btn_docker_clean_images.set_tooltip_text, self.strings["tooltip_cleanup_docker_images"])
+        if hasattr(self, "btn_docker_clean_volumes"):
+            GLib.idle_add(self.btn_docker_clean_volumes.set_label, self.strings["cleanup_docker_volumes"])
+            GLib.idle_add(self.btn_docker_clean_volumes.set_tooltip_text, self.strings["tooltip_cleanup_docker_volumes"])
+
+    def _refresh_dockge_state(self):
+        if not hasattr(self, "dockge_status_label"):
+            return
+        docker_installed = detect_docker_installed()
+        if not docker_installed:
+            status = self.strings["dockge_status_not_installed"]
+            running = False
+        else:
+            running = detect_dockge_running()
+            status = self.strings["dockge_status_running"] if running else self.strings["dockge_status_stopped"]
+        GLib.idle_add(self.dockge_status_label.set_label, status)
+
+        if hasattr(self, "btn_dockge_spin"):
+            label_key = "stop_dockge" if running else "spin_dockge"
+            tip_key = "tooltip_stop_dockge" if running else "tooltip_spin_dockge"
+            GLib.idle_add(self.btn_dockge_spin.set_label, self.strings[label_key])
+            GLib.idle_add(self.btn_dockge_spin.set_tooltip_text, self.strings[tip_key])
+            GLib.idle_add(self.btn_dockge_spin.set_sensitive, docker_installed)
+        if hasattr(self, "btn_dockge_open"):
+            GLib.idle_add(self.btn_dockge_open.set_label, self.strings["open_dockge"])
+            GLib.idle_add(self.btn_dockge_open.set_tooltip_text, self.strings["tooltip_open_dockge"])
+            GLib.idle_add(self.btn_dockge_open.set_sensitive, running)
+        if hasattr(self, "btn_dockge_restart"):
+            GLib.idle_add(self.btn_dockge_restart.set_label, self.strings["restart_dockge"])
+            GLib.idle_add(self.btn_dockge_restart.set_tooltip_text, self.strings["tooltip_restart_dockge"])
+            GLib.idle_add(self.btn_dockge_restart.set_sensitive, running)
 
     def refresh_all(self):
         for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]:
             self.refresh_service_state(st)
-        if hasattr(self, 'btn_docker_install'):
-            GLib.idle_add(self.btn_docker_install.set_tooltip_text, self.strings["tooltip_install_docker"])
-        if hasattr(self, 'btn_docker_spin'):
-            GLib.idle_add(self.btn_docker_spin.set_tooltip_text, self.strings["tooltip_spin_dockge"])
+        self._refresh_docker_state()
+        self._refresh_dockge_state()
 
     def poll_services_loop(self):
         while self.polling:
             for st in [ServiceType.KOHYA, ServiceType.FORGE, ServiceType.COMFY, ServiceType.OLLAMA]:
                 self.refresh_service_state(st)
+            self._refresh_docker_state()
+            self._refresh_dockge_state()
             time.sleep(5)

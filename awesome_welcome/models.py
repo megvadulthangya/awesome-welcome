@@ -10,6 +10,7 @@ class ServiceType(Enum):
     COMFY = "comfy"
     OLLAMA = "ollama"
     DOCKER = "docker"
+    DOCKGE = "dockge"
 
 
 @dataclass
