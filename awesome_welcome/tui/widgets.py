@@ -17,8 +17,9 @@ from awesome_welcome.services.kohya import (
 from awesome_welcome.services.forge import _forge_extensions_install_command
 from awesome_welcome.services.ollama import (
     detect_ollama_installed, ollama_install_command, ollama_update_command,
-    ollama_uninstall_command, get_webui_url, set_webui_url,
+    ollama_uninstall_command,
 )
+from awesome_welcome.services import webui as webui_cfg
 from awesome_welcome.services.docker import (
     detect_docker_installed, docker_install_command, docker_reinstall_command,
     docker_start_command, docker_stop_command, docker_restart_command,
@@ -89,12 +90,28 @@ class ServiceWidget(Static):
                     yield Button(self.lang.t("forge_purge"), id="forge-purge",
                                  tooltip=self.lang.t("tooltip_forge_purge"))
                 if self.service_type == ServiceType.OLLAMA:
-                    yield Button(self.lang.t("open_webui"), id="ollama-webui",
-                                 tooltip=self.lang.t("tooltip_open_webui"))
-                    yield Button(self.lang.t("edit_webui_url"), id="ollama-edit-url",
-                                 tooltip=self.lang.t("tooltip_edit_webui_url"))
                     yield Button(self.lang.t("remove_ollama"), id="ollama-remove",
                                  tooltip=self.lang.t("tooltip_remove_ollama"))
+            yield Static(
+                self.lang.t("webui_current_url").format(
+                    url=webui_cfg.get_url(self.service_type.value)
+                ),
+                id=f"webui-url-label-{self.service_type.value}",
+                classes="webui-url-label",
+            )
+            with Container(classes="webui-row"):
+                yield Button(
+                    self.lang.t("open_webui"),
+                    id=f"webui-{self.service_type.value}",
+                    tooltip=self.lang.t("tooltip_open_webui"),
+                    classes="webui-open-button",
+                )
+                yield Button(
+                    self.lang.t("edit_webui_url"),
+                    id=f"webui-edit-{self.service_type.value}",
+                    tooltip=self.lang.t("tooltip_edit_webui_url"),
+                    classes="webui-edit-button",
+                )
 
     def on_mount(self):
         self.update_status()
@@ -145,15 +162,36 @@ class ServiceWidget(Static):
                 btn_remove.disabled = not detect_ollama_installed()
             except Exception:
                 pass
-            try:
-                btn_webui = self.query_one("#ollama-webui", Button)
+
+        try:
+            btn_webui = self.query_one(f"#webui-{self.service_type.value}", Button)
+            btn_webui.label = self.lang.t("open_webui")
+            if self.service_type == ServiceType.OLLAMA:
                 webui_ready = detect_docker_installed() and detect_dockge_running()
                 btn_webui.disabled = not webui_ready
                 btn_webui.tooltip = self.lang.t(
                     "tooltip_open_webui" if webui_ready else "tooltip_open_webui_disabled"
                 )
-            except Exception:
-                pass
+            else:
+                btn_webui.disabled = False
+                btn_webui.tooltip = self.lang.t("tooltip_open_webui")
+        except Exception:
+            pass
+        try:
+            btn_edit = self.query_one(f"#webui-edit-{self.service_type.value}", Button)
+            btn_edit.label = self.lang.t("edit_webui_url")
+            btn_edit.tooltip = self.lang.t("tooltip_edit_webui_url")
+        except Exception:
+            pass
+        try:
+            url_label = self.query_one(f"#webui-url-label-{self.service_type.value}", Static)
+            url_label.update(
+                self.lang.t("webui_current_url").format(
+                    url=webui_cfg.get_url(self.service_type.value)
+                )
+            )
+        except Exception:
+            pass
 
     def get_status_text(self):
         profile = self.profile
@@ -215,10 +253,12 @@ class ServiceWidget(Static):
             self.forge_switch_version()
         elif btn_id == "forge-purge":
             self.forge_purge()
-        elif btn_id == "ollama-webui":
-            webbrowser.open(get_webui_url())
-        elif btn_id == "ollama-edit-url":
-            self.edit_webui_url()
+        elif btn_id.startswith("webui-edit-"):
+            svc = btn_id[len("webui-edit-"):]
+            self.edit_webui_url(ServiceType(svc))
+        elif btn_id.startswith("webui-"):
+            svc = btn_id[len("webui-"):]
+            webbrowser.open(webui_cfg.get_url(svc))
         elif btn_id == "ollama-remove":
             self.remove_ollama()
 
@@ -377,20 +417,22 @@ class ServiceWidget(Static):
 
         self.app.push_screen(ConfirmDialog(self.lang.t("forge_purge_warning")), callback=do_purge)
 
-    def edit_webui_url(self):
+    def edit_webui_url(self, st=None):
         from awesome_welcome.tui.dialogs import InputDialog
+
+        if st is None:
+            st = self.service_type
+        service_name = self.lang.t(SERVICE_REGISTRY[st].display_name_key)
+        title = self.lang.t("webui_dialog_title_for").format(service=service_name)
+        prompt = self.lang.t("webui_dialog_prompt_for").format(service=service_name)
 
         def handle_result(new_url):
             if new_url:
-                set_webui_url(new_url.strip())
+                webui_cfg.set_url(st.value, new_url.strip())
+                self.update_status()
 
         self.app.push_screen(
-            InputDialog(
-                self.lang.t("webui_url_dialog_title"),
-                self.lang.t("webui_url_dialog_prompt"),
-                get_webui_url(),
-                self.lang,
-            ),
+            InputDialog(title, prompt, webui_cfg.get_url(st.value), self.lang),
             callback=handle_result,
         )
 

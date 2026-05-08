@@ -21,8 +21,8 @@ from awesome_welcome.services.kohya import (
 from awesome_welcome.services.forge import _forge_extensions_install_command
 from awesome_welcome.services.ollama import (
     detect_ollama_installed, ollama_update_command, ollama_uninstall_command,
-    get_webui_url, set_webui_url
 )
+from awesome_welcome.services import webui as webui_cfg
 from awesome_welcome.services.docker import (
     detect_docker_installed, docker_install_command, docker_reinstall_command,
     docker_start_command, docker_stop_command, docker_restart_command,
@@ -319,20 +319,6 @@ class AIServicesManagerGTK(Gtk.Window):
             self.btn_forge_purge = btn_purge
 
         if st == ServiceType.OLLAMA:
-            btn_webui = Gtk.Button(label=self.strings["open_webui"])
-            btn_webui.get_style_context().add_class("service-button")
-            btn_webui.set_tooltip_text(self.strings["tooltip_open_webui"])
-            btn_webui.connect("clicked", self.on_open_webui)
-            btn_box.add(btn_webui)
-            self.btn_ollama_webui = btn_webui
-
-            btn_edit_url = Gtk.Button(label=self.strings["edit_webui_url"])
-            btn_edit_url.get_style_context().add_class("service-button")
-            btn_edit_url.set_tooltip_text(self.strings["tooltip_edit_webui_url"])
-            btn_edit_url.connect("clicked", self.on_edit_webui_url)
-            btn_box.add(btn_edit_url)
-            self.btn_ollama_edit_url = btn_edit_url
-
             btn_remove = Gtk.Button(label=self.strings["remove_ollama"])
             btn_remove.get_style_context().add_class("service-button")
             btn_remove.set_tooltip_text(self.strings["tooltip_remove_ollama"])
@@ -342,9 +328,48 @@ class AIServicesManagerGTK(Gtk.Window):
 
         box.pack_start(btn_box, False, False, 0)
 
+        webui_row = self._create_webui_row(st)
+        box.pack_end(webui_row, False, False, 0)
+
         setattr(self, f"status_label_{st.value}", status_label)
 
         return box
+
+    def _create_webui_row(self, st):
+        """Create the prominent 'Open WebUI' + 'Edit URL' row pinned to the bottom of a service page."""
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.get_style_context().add_class("webui-row")
+        row.set_margin_top(8)
+
+        url = webui_cfg.get_url(st.value)
+        url_label = Gtk.Label()
+        url_label.set_xalign(0)
+        url_label.set_markup(
+            f"<small>{self.strings['webui_current_url'].format(url=url)}</small>"
+        )
+        url_label.get_style_context().add_class("webui-url-label")
+        setattr(self, f"webui_url_label_{st.value}", url_label)
+
+        btn_webui = Gtk.Button(label=self.strings["open_webui"])
+        btn_webui.get_style_context().add_class("webui-open-button")
+        btn_webui.set_tooltip_text(self.strings["tooltip_open_webui"])
+        btn_webui.set_hexpand(True)
+        btn_webui.connect("clicked", self.on_open_webui_clicked, st)
+        setattr(self, f"btn_webui_{st.value}", btn_webui)
+
+        btn_edit = Gtk.Button(label=self.strings["edit_webui_url"])
+        btn_edit.get_style_context().add_class("webui-edit-button")
+        btn_edit.set_tooltip_text(self.strings["tooltip_edit_webui_url"])
+        btn_edit.connect("clicked", self.on_edit_webui_url_clicked, st)
+        setattr(self, f"btn_webui_edit_{st.value}", btn_edit)
+
+        wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        wrap.pack_start(url_label, False, False, 0)
+        row_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row_buttons.pack_start(btn_webui, True, True, 0)
+        row_buttons.pack_start(btn_edit, False, False, 0)
+        wrap.pack_start(row_buttons, False, False, 0)
+        return wrap
 
     def create_docker_page(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -846,31 +871,32 @@ class AIServicesManagerGTK(Gtk.Window):
         execute_command(dockge_restart_command(), "Restart Dockge", parent_gui=self)
         self._refresh_dockge_state()
 
-    def on_open_webui(self, btn):
-        url = get_webui_url()
+    def on_open_webui_clicked(self, btn, st):
+        url = webui_cfg.get_url(st.value)
         try:
             webbrowser.open(url)
         except Exception as e:
             self._show_error(str(e))
 
-    def on_edit_webui_url(self, btn):
-        dialog = Gtk.Dialog(
-            title=self.strings["webui_url_dialog_title"],
-            transient_for=self, flags=0,
-        )
-        dialog.set_default_size(420, 120)
+    def on_edit_webui_url_clicked(self, btn, st):
+        service_name = self.strings[SERVICE_REGISTRY[st].display_name_key]
+        title = self.strings["webui_dialog_title_for"].format(service=service_name)
+        prompt_text = self.strings["webui_dialog_prompt_for"].format(service=service_name)
+
+        dialog = Gtk.Dialog(title=title, transient_for=self, flags=0)
+        dialog.set_default_size(460, 120)
         content = dialog.get_content_area()
         content.set_spacing(8)
         content.set_margin_top(10)
         content.set_margin_start(10)
         content.set_margin_end(10)
 
-        prompt = Gtk.Label(label=self.strings["webui_url_dialog_prompt"])
+        prompt = Gtk.Label(label=prompt_text)
         prompt.set_xalign(0)
         content.pack_start(prompt, False, False, 0)
 
         entry = Gtk.Entry()
-        entry.set_text(get_webui_url())
+        entry.set_text(webui_cfg.get_url(st.value))
         entry.set_activates_default(True)
         content.pack_start(entry, False, False, 0)
 
@@ -884,10 +910,20 @@ class AIServicesManagerGTK(Gtk.Window):
         dialog.destroy()
         if resp == Gtk.ResponseType.OK and new_url:
             try:
-                set_webui_url(new_url)
+                webui_cfg.set_url(st.value, new_url)
+                self._refresh_webui_url_label(st)
                 self._show_info(self.strings["webui_url_saved"])
             except Exception as e:
                 self._show_error(str(e))
+
+    def _refresh_webui_url_label(self, st):
+        """Refresh the 'Current URL: ...' line under the WebUI buttons for one service."""
+        attr = f"webui_url_label_{st.value}"
+        if not hasattr(self, attr):
+            return
+        url = webui_cfg.get_url(st.value)
+        markup = f"<small>{self.strings['webui_current_url'].format(url=url)}</small>"
+        GLib.idle_add(getattr(self, attr).set_markup, markup)
 
     def on_install_clicked_ollama_aware(self, btn, st):
         """Wrap Install/Update for Ollama: re-runs the install script either way."""
@@ -985,15 +1021,23 @@ class AIServicesManagerGTK(Gtk.Window):
             else:
                 txt = self.strings["forge_not_installed_label"]
             GLib.idle_add(self.forge_installed_label.set_markup, f"<b>{txt}</b>")
-        if st == ServiceType.OLLAMA:
-            if hasattr(self, "btn_ollama_webui"):
+        if hasattr(self, f"btn_webui_{st.value}"):
+            btn_webui = getattr(self, f"btn_webui_{st.value}")
+            GLib.idle_add(btn_webui.set_label, self.strings["open_webui"])
+            if st == ServiceType.OLLAMA:
                 webui_ready = detect_docker_installed() and detect_dockge_running()
-                GLib.idle_add(self.btn_ollama_webui.set_sensitive, webui_ready)
+                GLib.idle_add(btn_webui.set_sensitive, webui_ready)
                 tip_key = "tooltip_open_webui" if webui_ready else "tooltip_open_webui_disabled"
-                GLib.idle_add(self.btn_ollama_webui.set_tooltip_text, self.strings[tip_key])
-            if hasattr(self, "btn_ollama_edit_url"):
-                GLib.idle_add(self.btn_ollama_edit_url.set_tooltip_text, self.strings["tooltip_edit_webui_url"])
-                GLib.idle_add(self.btn_ollama_edit_url.set_label, self.strings["edit_webui_url"])
+                GLib.idle_add(btn_webui.set_tooltip_text, self.strings[tip_key])
+            else:
+                GLib.idle_add(btn_webui.set_sensitive, True)
+                GLib.idle_add(btn_webui.set_tooltip_text, self.strings["tooltip_open_webui"])
+        if hasattr(self, f"btn_webui_edit_{st.value}"):
+            btn_edit = getattr(self, f"btn_webui_edit_{st.value}")
+            GLib.idle_add(btn_edit.set_label, self.strings["edit_webui_url"])
+            GLib.idle_add(btn_edit.set_tooltip_text, self.strings["tooltip_edit_webui_url"])
+        self._refresh_webui_url_label(st)
+        if st == ServiceType.OLLAMA:
             if hasattr(self, "btn_ollama_remove"):
                 GLib.idle_add(self.btn_ollama_remove.set_tooltip_text, self.strings["tooltip_remove_ollama"])
                 GLib.idle_add(self.btn_ollama_remove.set_label, self.strings["remove_ollama"])

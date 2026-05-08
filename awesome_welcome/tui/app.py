@@ -74,6 +74,42 @@ class AIServicesManagerTUI(App):
         width: 1fr;
         margin: 0;
     }}
+    .webui-url-label {{
+        color: {NORD_COLORS['light1']};
+        height: auto;
+        width: 1fr;
+        margin-top: 1;
+        padding: 0 1;
+        text-style: italic;
+    }}
+    .webui-row {{
+        layout: horizontal;
+        height: auto;
+        width: 1fr;
+        margin-top: 1;
+        border-top: solid {NORD_COLORS['dark3']};
+        padding-top: 1;
+    }}
+    .webui-row .webui-open-button {{
+        background: {NORD_COLORS['frost1']};
+        color: {NORD_COLORS['dark0']};
+        text-style: bold;
+        width: 3fr;
+        margin: 0 1 0 0;
+    }}
+    .webui-row .webui-open-button:hover {{
+        background: {NORD_COLORS['frost0']};
+    }}
+    .webui-row .webui-open-button:disabled {{
+        background: {NORD_COLORS['dark2']};
+        color: {NORD_COLORS['dark3']};
+    }}
+    .webui-row .webui-edit-button {{
+        background: {NORD_COLORS['dark3']};
+        color: {NORD_COLORS['light2']};
+        width: 1fr;
+        margin: 0;
+    }}
     Button {{
         background: {NORD_COLORS['dark3']};
         color: {NORD_COLORS['light2']};

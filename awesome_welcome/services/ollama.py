@@ -3,11 +3,12 @@ import os
 import shutil
 
 from awesome_welcome.helpers import run_command
+from awesome_welcome.services import webui
 
 
-DEFAULT_WEBUI_URL = "http://localhost:8080"
-USER_CONFIG_DIR = os.path.expanduser("~/.config/awesome-welcome")
-WEBUI_URL_FILE = os.path.join(USER_CONFIG_DIR, "ollama_webui_url")
+DEFAULT_WEBUI_URL = webui.DEFAULT_URLS["ollama"]
+USER_CONFIG_DIR = webui.USER_CONFIG_DIR
+WEBUI_URL_FILE = webui._file_for("ollama")
 
 
 def detect_ollama_installed():

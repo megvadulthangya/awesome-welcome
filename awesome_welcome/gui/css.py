@@ -47,4 +47,46 @@ checkbutton:checked, radiobutton:checked {{
     color: {NORD_COLORS['green']};
     font-weight: bold;
 }}
+
+/*
+ * Prominent "Open WebUI" row pinned to the bottom of every service tab.
+ * The Open button is the main entry point to the running web frontend on
+ * each service (Forge:7860 / Comfy:8188 / Kohya:7861 / Ollama:8080 by
+ * default), so it gets accent styling. Edit URL is its smaller companion.
+ */
+.webui-row {{
+    margin-top: 10px;
+    border-top: 1px solid {NORD_COLORS['dark3']};
+    padding-top: 8px;
+}}
+.webui-url-label {{
+    color: {NORD_COLORS['light1']};
+    font-size: 11px;
+    margin-bottom: 4px;
+}}
+.webui-open-button {{
+    background-color: {NORD_COLORS['frost1']};
+    color: {NORD_COLORS['dark0']};
+    font-weight: bold;
+    padding: 10px;
+    font-size: 14px;
+    border-radius: 4px;
+}}
+.webui-open-button:hover {{
+    background-color: {NORD_COLORS['frost0']};
+}}
+.webui-open-button:disabled {{
+    background-color: {NORD_COLORS['dark2']};
+    color: {NORD_COLORS['dark3']};
+}}
+.webui-edit-button {{
+    background-color: {NORD_COLORS['dark3']};
+    color: {NORD_COLORS['light2']};
+    padding: 8px;
+    font-size: 12px;
+    border-radius: 4px;
+}}
+.webui-edit-button:hover {{
+    background-color: {NORD_COLORS['frost3']};
+}}
 """
