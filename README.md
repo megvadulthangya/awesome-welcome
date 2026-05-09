@@ -47,14 +47,6 @@ awesome-welcome --test
 awesome-welcome --tui --services --test
 ```
 
-## Installation
-
-### From AUR / PKGBUILD
-
-The package name is `awesome-welcome-ai`. It installs the application as `awesome-welcome` to `/usr/bin/awesome-welcome`.
-
-> **Note:** This package conflicts with `awesome-welcome` (main branch version). Only one can be installed at a time.
-
 ### Dependencies
 
 | Package | Required | Purpose |
